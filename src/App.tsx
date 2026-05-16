@@ -2,11 +2,12 @@ import React, { useState, useRef, FormEvent, useEffect } from "react";
 import { Cola, ColaInventario } from "./lib/dataStructures/colaInventario";
 import { TablaHash } from "./lib/dataStructures/tablaHash";
 import { GrafoLogistica } from "./lib/dataStructures/grafoLogistica";
-import { Cliente, Pedido, Producto } from "./lib/dataStructures/models";
+import { Cliente, Pedido, Producto } from "./models";
 import { PackageOpen, Map as MapIcon, Truck, Search, PlusCircle, CheckCircle, Package, LayoutDashboard, Users, MapPin, User } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import Rutas from './pages/Rutas';
 import sidebarLogo from "./assets/logotransparente.png";
 
 // Fix leaflet icon issue in React
@@ -21,7 +22,7 @@ type TabType = 'dashboard' | 'inventario' | 'rutas' | 'clientes';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<TabType>('dashboard');
-  
+
   const colaPedidosRef = useRef(new Cola<Pedido>());
   const colaInventarioRef = useRef(new ColaInventario());
   const tablaClientesRef = useRef(new TablaHash<Cliente>());
@@ -43,15 +44,13 @@ export default function App() {
   const [buscarClienteId, setBuscarClienteId] = useState("");
   const [clienteEncontrado, setClienteEncontrado] = useState<Cliente | null>(null);
 
-  // Rutas Form
-  const [rutaInicio, setRutaInicio] = useState("");
-  const [rutaFin, setRutaFin] = useState("");
-  const [rutaOptima, setRutaOptima] = useState<{ruta: string[], distanciaTotal: number} | null>(null);
+  // Cola de Despacho
+  const [pedidosEnTransito, setPedidosEnTransito] = useState<Producto[]>([]);
 
   useEffect(() => {
     // Inicializar Grafo
     const grafo = grafoRutasRef.current;
-    
+
     // Coordenadas aproximadas Asunción / Central, Paraguay
     grafo.agregarPuntoEntrega("deposito_central", "Depósito Central", { lat: -25.2968, lng: -57.6256 });
     grafo.agregarPuntoEntrega("cliente_lambare", "Cliente Lambaré", { lat: -25.3375, lng: -57.6272 });
@@ -64,15 +63,15 @@ export default function App() {
     grafo.conectarPuntos("cliente_lambare", "cliente_fernando", 6);
 
     // Inicializar algunos clientes (Tabla Hash)
-    const cliente1 = new Cliente("4123456", "Juan Pérez", "Calle Lambaré 123", -25.3375, -57.6272);
+    const cliente1 = new Cliente(4123456, "Juan Pérez", "juan@ejemplo.com", "0981234567", "4123456", "Calle Lambaré 123");
     tablaClientesRef.current.insertar("4123456", cliente1);
   }, []);
 
   const handleIngresarLote = (e: FormEvent) => {
     e.preventDefault();
     if (!productoNombre || !productoPrecio || !productoCantidad) return;
-    
-    const prod = new Producto(`PRD-${Date.now()}`, productoNombre, parseFloat(productoPrecio), 1);
+
+    const prod = new Producto(`PRD-${Date.now()}`, productoNombre, "otros", parseFloat(productoPrecio), 1);
     colaInventarioRef.current.ingresarLote(prod, parseInt(productoCantidad));
     forceUpdate();
   };
@@ -80,10 +79,10 @@ export default function App() {
   const handleRegistrarCliente = (e: FormEvent) => {
     e.preventDefault();
     if (!clienteId || !nombre || !direccion) return;
-    
-    const cliente = new Cliente(clienteId, nombre, direccion, 0, 0); // Simulando coord
+
+    const cliente = new Cliente(Date.now(), nombre, "sin@email.com", "000000", clienteId, direccion);
     tablaClientesRef.current.insertar(clienteId, cliente);
-    
+
     // Auto añadir al grafo para visualizarlo (simplificado)
     grafoRutasRef.current.agregarPuntoEntrega(clienteId, nombre, { lat: -25.3 + (Math.random() * 0.1 - 0.05), lng: -57.6 + (Math.random() * 0.1 - 0.05) });
     grafoRutasRef.current.conectarPuntos("deposito_central", clienteId, Math.floor(Math.random() * 20) + 1);
@@ -98,12 +97,7 @@ export default function App() {
     setClienteEncontrado(c);
   };
 
-  const handleCalcularRuta = () => {
-    if (!rutaInicio || !rutaFin) return;
-    const optima = grafoRutasRef.current.calcularRutaOptima(rutaInicio, rutaFin);
-    setRutaOptima(optima);
-    forceUpdate();
-  }
+
 
   const renderDashboard = () => (
     <div className="max-w-container-max mx-auto">
@@ -269,17 +263,17 @@ export default function App() {
           <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><PlusCircle /> Ingresar Lote</h2>
           <form onSubmit={handleIngresarLote} className="space-y-4">
             <div>
-               <label className="block text-sm font-medium">Producto</label>
-               <input type="text" value={productoNombre} onChange={e => setProductoNombre(e.target.value)} className="w-full border p-2 rounded" placeholder="Ej: Termo" />
+              <label className="block text-sm font-medium">Producto</label>
+              <input type="text" value={productoNombre} onChange={e => setProductoNombre(e.target.value)} className="w-full border p-2 rounded" placeholder="Ej: Termo" />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                 <label className="block text-sm font-medium">Precio</label>
-                 <input type="number" value={productoPrecio} onChange={e => setProductoPrecio(e.target.value)} className="w-full border p-2 rounded" placeholder="Ej: 150" />
+                <label className="block text-sm font-medium">Precio</label>
+                <input type="number" value={productoPrecio} onChange={e => setProductoPrecio(e.target.value)} className="w-full border p-2 rounded" placeholder="Ej: 150" />
               </div>
               <div>
-                 <label className="block text-sm font-medium">Cantidad</label>
-                 <input type="number" value={productoCantidad} onChange={e => setProductoCantidad(e.target.value)} className="w-full border p-2 rounded" min="1" />
+                <label className="block text-sm font-medium">Cantidad</label>
+                <input type="number" value={productoCantidad} onChange={e => setProductoCantidad(e.target.value)} className="w-full border p-2 rounded" min="1" />
               </div>
             </div>
             <button type="submit" className="w-full bg-[#2E7D32] text-white py-2 rounded font-medium hover:bg-green-800">
@@ -295,8 +289,8 @@ export default function App() {
               <div className="text-sm font-bold text-orange-500">↑ FRENTE (Próximos a salir)</div>
               {stockVisual.map((p, i) => (
                 <div key={i} className="p-3 border rounded flex justify-between bg-gray-50">
-                   <span>{p.getNombre()} (ID: {p.getId()})</span>
-                   <span className="font-mono text-sm text-gray-500">${p.getPrecio()}</span>
+                  <span>{p.getNombre()} (ID: {p.getCodigo()})</span>
+                  <span className="font-mono text-sm text-gray-500">${p.getPrecio()}</span>
                 </div>
               ))}
               <div className="text-sm font-bold text-blue-500">↓ FINAL (Últimos en entrar)</div>
@@ -313,19 +307,19 @@ export default function App() {
         <h2 className="text-xl font-bold mb-4">Añadir Cliente (O(1))</h2>
         <form onSubmit={handleRegistrarCliente} className="space-y-4">
           <div><label className="block text-sm font-medium">Cédula / RUC (ID)</label>
-          <input value={clienteId} onChange={e=>setClienteId(e.target.value)} className="w-full border p-2 hover:border-primary" /></div>
+            <input value={clienteId} onChange={e => setClienteId(e.target.value)} className="w-full border p-2 hover:border-primary" /></div>
           <div><label className="block text-sm font-medium">Nombre</label>
-          <input value={nombre} onChange={e=>setNombre(e.target.value)} className="w-full border p-2" /></div>
+            <input value={nombre} onChange={e => setNombre(e.target.value)} className="w-full border p-2" /></div>
           <div><label className="block text-sm font-medium">Dirección</label>
-          <input value={direccion} onChange={e=>setDireccion(e.target.value)} className="w-full border p-2" /></div>
+            <input value={direccion} onChange={e => setDireccion(e.target.value)} className="w-full border p-2" /></div>
           <button className="w-full bg-[#2E7D32] text-white p-2 rounded">Guardar en Hash Table</button>
         </form>
       </div>
-      
+
       <div className="bg-white p-6 rounded-xl border border-gray-200">
         <h2 className="text-xl font-bold mb-4 text-primary">Buscar Rápido (Hash Table)</h2>
         <div className="flex gap-2">
-          <input value={buscarClienteId} onChange={e=>setBuscarClienteId(e.target.value)} placeholder="Cédula/RUC" className="flex-1 border p-2 rounded" />
+          <input value={buscarClienteId} onChange={e => setBuscarClienteId(e.target.value)} placeholder="Cédula/RUC" className="flex-1 border p-2 rounded" />
           <button onClick={handleBuscarCliente} className="bg-blue-600 text-white px-4 rounded">Buscar</button>
         </div>
         {clienteEncontrado && (
@@ -339,7 +333,7 @@ export default function App() {
         <div className="space-y-2 max-h-40 overflow-y-auto">
           {tablaClientesRef.current.obtenerValores().map(c => (
             <div key={c.getId()} className="p-2 border-b text-sm">
-              <span className="font-bold">{c.getId()}</span> - {c.getNombre()}
+              <span className="font-bold">{c.getDocumento()}</span> - {c.getNombre()}
             </div>
           ))}
         </div>
@@ -347,80 +341,7 @@ export default function App() {
     </div>
   );
 
-  const renderRutas = () => {
-    const nodos = (grafoRutasRef.current as any).puntos;
-    const arrayNodos = Object.values(nodos) as typeof nodos[keyof typeof nodos][];
-    
-    // Coordenadas para la polyline de la ruta óptima
-    let rutaCoords: [number, number][] = [];
-    if (rutaOptima) {
-      rutaCoords = rutaOptima.ruta.map(nodoId => {
-        const p = nodos[nodoId].coordenadas;
-        return [p.lat, p.lng];
-      });
-    }
 
-    return (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-1 space-y-6">
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-             <h2 className="text-xl font-bold mb-4 text-primary">Algoritmo de Dijkstra</h2>
-             <div className="space-y-4">
-               <div>
-                  <label className="text-sm font-bold text-gray-700">Origen</label>
-                  <select value={rutaInicio} onChange={e => setRutaInicio(e.target.value)} className="w-full border p-2 mt-1 rounded bg-white">
-                    <option value="">Seleccione...</option>
-                    {arrayNodos.map(n => <option key={`orig-${n.idNodo}`} value={n.idNodo}>{n.nombreCliente}</option>)}
-                  </select>
-               </div>
-               <div>
-                  <label className="text-sm font-bold text-gray-700">Destino</label>
-                  <select value={rutaFin} onChange={e => setRutaFin(e.target.value)} className="w-full border p-2 mt-1 rounded bg-white">
-                    <option value="">Seleccione...</option>
-                    {arrayNodos.map(n => <option key={`dest-${n.idNodo}`} value={n.idNodo}>{n.nombreCliente}</option>)}
-                  </select>
-               </div>
-               <button onClick={handleCalcularRuta} className="w-full bg-orange-600 text-white font-bold py-2 rounded hover:bg-orange-700">
-                 Optimizar Ruta
-               </button>
-             </div>
-
-             {rutaOptima && (
-               <div className="mt-6 bg-orange-50 p-4 rounded border border-orange-200">
-                 <h3 className="font-bold text-orange-800">Resultado Óptimo</h3>
-                 <p className="text-sm">Distancia: <strong>{rutaOptima.distanciaTotal} km</strong></p>
-                 <div className="mt-2 text-sm text-gray-700 font-mono">
-                    {rutaOptima.ruta.map((r, i) => (
-                      <span key={i}>
-                        {i > 0 && " → "}
-                        {nodos[r].nombreCliente}
-                      </span>
-                    ))}
-                 </div>
-               </div>
-             )}
-          </div>
-        </div>
-
-        <div className="lg:col-span-2 bg-white rounded-xl overflow-hidden border border-gray-200 shadow-sm h-[500px]">
-          <MapContainer center={[-25.3, -57.6]} zoom={11} className="w-full h-full">
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            {arrayNodos.map(n => (
-              <Marker key={n.idNodo} position={[n.coordenadas.lat, n.coordenadas.lng]}>
-                <Popup>{n.nombreCliente} ({n.idNodo})</Popup>
-              </Marker>
-            ))}
-            {rutaCoords.length > 0 && (
-              <Polyline positions={rutaCoords} color="#f97316" weight={5} opacity={0.8} />
-            )}
-          </MapContainer>
-        </div>
-      </div>
-    );
-  };
 
   return (
     <div className="bg-background text-on-background font-body-md min-h-screen flex">
@@ -499,7 +420,7 @@ export default function App() {
         <main className="flex-1 p-xl">
           {currentTab === 'dashboard' && renderDashboard()}
           {currentTab === 'inventario' && renderInventario()}
-          {currentTab === 'rutas' && renderRutas()}
+          {currentTab === 'rutas' && <Rutas grafo={grafoRutasRef.current} pedidosEnTransito={pedidosEnTransito} />}
           {currentTab === 'clientes' && renderClientes()}
         </main>
       </div>

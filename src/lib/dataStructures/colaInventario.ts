@@ -1,4 +1,4 @@
-import { Producto } from './models';
+import { Producto } from '../../models';
 
 /**
  * Módulo 1: Cola (Queue - Estructura FIFO)

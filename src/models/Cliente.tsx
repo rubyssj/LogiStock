@@ -33,13 +33,13 @@ export class Cliente {
         modalidadNegocio: "MicroEmpresa" | "Emprendedor",
         cantidadEmpleados: string,
         depositos: Deposito[] = []
-    ) { 
-        if (!nombre.trim()) throw new Error("El nombre del cliente no puede estar vacío."); 
-        
-        // Validación de Documento (RUC o Cédula) - Ej: "1234567-8", "1234567" o "1.234.567"
+    ) {
+        if (!nombre.trim()) throw new Error("El nombre del cliente no puede estar vacío.");
+
+        // Validación de Documento (RUC o Cédula) en formato paraguayo (ej: "1234567" o "1234567-8"), sin letras ni puntos.
         if (!documento.trim()) throw new Error("El documento (RUC/Cédula) es obligatorio.");
-        const rucRegex = /^[\d\.\-A-Za-z]+$/;
-        if (!rucRegex.test(documento)) throw new Error("El RUC/CI tiene formato inválido. Use números, letras, puntos o guiones.");
+        const rucRegex = /^\d+(-\d)?$/;
+        if (!rucRegex.test(documento)) throw new Error("El RUC/CI tiene un formato inválido para Paraguay. Use solo números o números con guion verificador (ej: 1234567 o 1234567-8), sin letras ni puntos.");
 
         // Validación de Email
         if (!email.trim()) throw new Error("El correo electrónico es obligatorio.");

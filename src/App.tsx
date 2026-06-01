@@ -3,7 +3,8 @@ import { Cola, ColaInventario } from "./lib/dataStructures/colaInventario";
 import { TablaHash } from "./lib/dataStructures/tablaHash";
 import { GrafoLogistica } from "./lib/dataStructures/grafoLogistica";
 import { Cliente, Pedido, Producto } from "./models";
-import { PackageOpen, Map as MapIcon, Truck, Search, PlusCircle, CheckCircle, Package, LayoutDashboard, Users, MapPin, User } from 'lucide-react';
+import { generador } from "./utils/generadorIds";
+import { PackageOpen, Map as MapIcon, Truck, Search, PlusCircle, CheckCircle, Package, LayoutDashboard, Users, MapPin, User, Building } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -36,11 +37,21 @@ export default function App() {
   const [productoPrecio, setProductoPrecio] = useState("");
   const [productoCantidad, setProductoCantidad] = useState("1");
   const [buscarProductoId, setBuscarProductoId] = useState("");
+  const [productoError, setProductoError] = useState<string | null>(null);
 
   // Cliente Form
   const [clienteId, setClienteId] = useState("");
   const [nombre, setNombre] = useState("");
+  const [apellido, setApellido] = useState("");
+  const [email, setEmail] = useState("");
+  const [telefono, setTelefono] = useState("");
   const [direccion, setDireccion] = useState("");
+  const [modalidadNegocio, setModalidadNegocio] = useState<"MicroEmpresa" | "Emprendedor">("Emprendedor");
+  const [cantidadEmpleados, setCantidadEmpleados] = useState("1");
+  const [depositosCliente, setDepositosCliente] = useState<{ nombre: string, direccion: string, ciudad: string, barrio: string }[]>([]);
+  const [depositoTemp, setDepositoTemp] = useState({ nombre: "", direccion: "", ciudad: "", barrio: "" });
+  const [clienteError, setClienteError] = useState<string | null>(null);
+
   const [buscarClienteId, setBuscarClienteId] = useState("");
   const [clienteEncontrado, setClienteEncontrado] = useState<Cliente | null>(null);
 
@@ -63,7 +74,7 @@ export default function App() {
     grafo.conectarPuntos("cliente_lambare", "cliente_fernando", 6);
 
     // Inicializar algunos clientes (Tabla Hash)
-    const cliente1 = new Cliente(4123456, "Juan Pérez", "juan@ejemplo.com", "0981234567", "4123456", "Calle Lambaré 123");
+    const cliente1 = new Cliente("Juan Pérez", "juan@ejemplo.com", "0981234567", "4123456", "Calle Lambaré 123", "Emprendedor", "1", []);
     tablaClientesRef.current.insertar("4123456", cliente1);
   }, []);
 
@@ -71,24 +82,55 @@ export default function App() {
     e.preventDefault();
     if (!productoNombre || !productoPrecio || !productoCantidad) return;
 
-    const prod = new Producto(`PRD-${Date.now()}`, productoNombre, "otros", parseFloat(productoPrecio), 1);
-    colaInventarioRef.current.ingresarLote(prod, parseInt(productoCantidad));
-    forceUpdate();
+    try {
+      setProductoError(null);
+      const prod = new Producto(productoNombre, "otros", parseFloat(productoPrecio), 1);
+      colaInventarioRef.current.ingresarLote(prod, parseInt(productoCantidad));
+      setProductoNombre(""); setProductoPrecio(""); setProductoCantidad("1");
+      forceUpdate();
+    } catch (error: any) {
+      setProductoError(error.message);
+    }
   };
 
   const handleRegistrarCliente = (e: FormEvent) => {
     e.preventDefault();
     if (!clienteId || !nombre || !direccion) return;
 
-    const cliente = new Cliente(Date.now(), nombre, "sin@email.com", "000000", clienteId, direccion);
-    tablaClientesRef.current.insertar(clienteId, cliente);
+    const depositosFormales = depositosCliente.map(d => ({
+      idNodo: generador.nuevoIdNodo(),
+      nombre: d.nombre,
+      direccion: d.direccion,
+      ciudad: d.ciudad,
+      barrio: d.barrio,
+      coordenadas: { lat: -25.3 + (Math.random() * 0.1 - 0.05), lng: -57.6 + (Math.random() * 0.1 - 0.05) }
+    }));
 
-    // Auto añadir al grafo para visualizarlo (simplificado)
-    grafoRutasRef.current.agregarPuntoEntrega(clienteId, nombre, { lat: -25.3 + (Math.random() * 0.1 - 0.05), lng: -57.6 + (Math.random() * 0.1 - 0.05) });
-    grafoRutasRef.current.conectarPuntos("deposito_central", clienteId, Math.floor(Math.random() * 20) + 1);
+    try {
+      setClienteError(null);
+      const cliente = new Cliente(
+        nombre + " " + apellido,
+        email || "sin@email.com",
+        telefono || "000000",
+        clienteId,
+        direccion,
+        modalidadNegocio,
+        cantidadEmpleados,
+        depositosFormales
+      );
+      tablaClientesRef.current.insertar(clienteId, cliente);
 
-    setClienteId(""); setNombre(""); setDireccion("");
-    forceUpdate();
+      depositosFormales.forEach(dep => {
+        grafoRutasRef.current.agregarPuntoEntrega(dep.idNodo, `${cliente.getNombre()} - ${dep.nombre}`, dep.coordenadas);
+        grafoRutasRef.current.conectarPuntos("deposito_central", dep.idNodo, Math.floor(Math.random() * 20) + 1);
+      });
+
+      setClienteId(""); setNombre(""); setApellido(""); setEmail(""); setTelefono(""); setDireccion("");
+      setDepositosCliente([]);
+      forceUpdate();
+    } catch (error: any) {
+      setClienteError(error.message);
+    }
   };
 
   const handleBuscarCliente = () => {
@@ -261,6 +303,11 @@ export default function App() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <div className="bg-white p-6 rounded-xl border border-gray-200">
           <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><PlusCircle /> Ingresar Lote</h2>
+          {productoError && (
+              <div className="bg-red-50 text-red-700 p-3 rounded-md mb-4 text-sm font-medium border border-red-200">
+                  {productoError}
+              </div>
+          )}
           <form onSubmit={handleIngresarLote} className="space-y-4">
             <div>
               <label className="block text-sm font-medium">Producto</label>
@@ -301,41 +348,139 @@ export default function App() {
     );
   };
 
+  const agregarDepositoTemp = (e: FormEvent) => {
+    e.preventDefault();
+    if (!depositoTemp.nombre || !depositoTemp.direccion) return;
+    setDepositosCliente([...depositosCliente, depositoTemp]);
+    setDepositoTemp({ nombre: "", direccion: "", ciudad: "", barrio: "" });
+  };
+
   const renderClientes = () => (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-      <div className="bg-white p-6 rounded-xl border border-gray-200">
-        <h2 className="text-xl font-bold mb-4">Añadir Cliente (O(1))</h2>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+        <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><User className="text-primary" /> Añadir Cliente</h2>
+        {clienteError && (
+            <div className="bg-red-50 text-red-700 p-3 rounded-md mb-4 text-sm font-medium border border-red-200">
+                {clienteError}
+            </div>
+        )}
         <form onSubmit={handleRegistrarCliente} className="space-y-4">
-          <div><label className="block text-sm font-medium">Cédula / RUC (ID)</label>
-            <input value={clienteId} onChange={e => setClienteId(e.target.value)} className="w-full border p-2 hover:border-primary" /></div>
-          <div><label className="block text-sm font-medium">Nombre</label>
-            <input value={nombre} onChange={e => setNombre(e.target.value)} className="w-full border p-2" /></div>
-          <div><label className="block text-sm font-medium">Dirección</label>
-            <input value={direccion} onChange={e => setDireccion(e.target.value)} className="w-full border p-2" /></div>
-          <button className="w-full bg-[#2E7D32] text-white p-2 rounded">Guardar en Hash Table</button>
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="block text-sm font-medium">Cédula / RUC</label>
+              <input required value={clienteId} onChange={e => setClienteId(e.target.value)} className="w-full border p-2 rounded" /></div>
+            <div><label className="block text-sm font-medium">Teléfono</label>
+              <input required value={telefono} onChange={e => setTelefono(e.target.value)} className="w-full border p-2 rounded" /></div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="block text-sm font-medium">Nombre</label>
+              <input required value={nombre} onChange={e => setNombre(e.target.value)} className="w-full border p-2 rounded" /></div>
+            <div><label className="block text-sm font-medium">Apellido</label>
+              <input value={apellido} onChange={e => setApellido(e.target.value)} className="w-full border p-2 rounded" /></div>
+          </div>
+
+          <div><label className="block text-sm font-medium">Email</label>
+            <input required type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full border p-2 rounded" /></div>
+
+          <div><label className="block text-sm font-medium">Dirección Principal</label>
+            <input required value={direccion} onChange={e => setDireccion(e.target.value)} className="w-full border p-2 rounded" /></div>
+
+          {/* PARAMETRIZACIÓN: Modalidad de Negocio */}
+          <div className="bg-slate-50 p-4 rounded-md border border-slate-200">
+            <h3 className="font-bold text-slate-700 mb-2">Clasificación de Negocio</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-600">Modalidad</label>
+                <select
+                  value={modalidadNegocio}
+                  onChange={e => setModalidadNegocio(e.target.value as any)}
+                  className="w-full border p-2 rounded bg-white"
+                >
+                  <option value="Emprendedor">Emprendedor</option>
+                  <option value="MicroEmpresa">MicroEmpresa</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-600">Cant. Empleados</label>
+                <select
+                  value={modalidadNegocio === "Emprendedor" ? "1" : cantidadEmpleados}
+                  onChange={e => setCantidadEmpleados(e.target.value)}
+                  disabled={modalidadNegocio === "Emprendedor"}
+                  className={`w-full border p-2 rounded bg-white ${modalidadNegocio === "Emprendedor" ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  <option value="1">1 (Solo)</option>
+                  <option value="2-5">2 a 5</option>
+                  <option value="6-10">6 a 10</option>
+                  <option value="+10">Más de 10</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* SUB-FORMULARIO: Múltiples Depósitos */}
+          <div className="bg-orange-50 p-4 rounded-md border border-orange-200">
+            <h3 className="font-bold text-orange-800 mb-2 flex items-center gap-2"><Building className="w-4 h-4" /> Sucursales / Depósitos ({depositosCliente.length})</h3>
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <input placeholder="Nombre (ej. Local Centro)" value={depositoTemp.nombre} onChange={e => setDepositoTemp({ ...depositoTemp, nombre: e.target.value })} className="border p-2 rounded text-sm" />
+              <input placeholder="Dirección exacta" value={depositoTemp.direccion} onChange={e => setDepositoTemp({ ...depositoTemp, direccion: e.target.value })} className="border p-2 rounded text-sm" />
+              <input placeholder="Ciudad" value={depositoTemp.ciudad} onChange={e => setDepositoTemp({ ...depositoTemp, ciudad: e.target.value })} className="border p-2 rounded text-sm" />
+              <input placeholder="Barrio" value={depositoTemp.barrio} onChange={e => setDepositoTemp({ ...depositoTemp, barrio: e.target.value })} className="border p-2 rounded text-sm" />
+            </div>
+            <button type="button" onClick={agregarDepositoTemp} className="bg-orange-200 text-orange-800 px-3 py-1 text-sm font-bold rounded hover:bg-orange-300 w-full mb-3">
+              + Añadir Depósito al Cliente
+            </button>
+
+            {/* Lista temporal de depósitos */}
+            {depositosCliente.length > 0 && (
+              <ul className="text-xs space-y-1">
+                {depositosCliente.map((d, i) => (
+                  <li key={i} className="bg-white p-1 rounded border border-orange-100 font-mono text-orange-900">
+                    • {d.nombre} ({d.ciudad} - {d.barrio})
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <button className="w-full bg-[#2E7D32] text-white py-3 rounded-lg font-bold hover:bg-green-800 shadow-md transition-transform active:scale-95">
+            Guardar Cliente Oficial
+          </button>
         </form>
       </div>
 
-      <div className="bg-white p-6 rounded-xl border border-gray-200">
-        <h2 className="text-xl font-bold mb-4 text-primary">Buscar Rápido (Hash Table)</h2>
-        <div className="flex gap-2">
-          <input value={buscarClienteId} onChange={e => setBuscarClienteId(e.target.value)} placeholder="Cédula/RUC" className="flex-1 border p-2 rounded" />
-          <button onClick={handleBuscarCliente} className="bg-blue-600 text-white px-4 rounded">Buscar</button>
-        </div>
-        {clienteEncontrado && (
-          <div className="mt-4 bg-green-50 p-4 rounded border border-green-200">
-            <p><strong>Nombre:</strong> {clienteEncontrado.getNombre()}</p>
-            <p><strong>Dirección:</strong> {clienteEncontrado.getDireccion()}</p>
+      <div className="space-y-6">
+        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+          <h2 className="text-xl font-bold mb-4 text-primary flex items-center gap-2"><Search className="w-5 h-5" /> Buscar Rápido (O(1))</h2>
+          <div className="flex gap-2">
+            <input value={buscarClienteId} onChange={e => setBuscarClienteId(e.target.value)} placeholder="Cédula/RUC" className="flex-1 border p-2 rounded" />
+            <button onClick={handleBuscarCliente} className="bg-blue-600 text-white px-4 rounded hover:bg-blue-700">Buscar</button>
           </div>
-        )}
-
-        <h3 className="font-bold mt-8 mb-2">Directorio Actual</h3>
-        <div className="space-y-2 max-h-40 overflow-y-auto">
-          {tablaClientesRef.current.obtenerValores().map(c => (
-            <div key={c.getId()} className="p-2 border-b text-sm">
-              <span className="font-bold">{c.getDocumento()}</span> - {c.getNombre()}
+          {clienteEncontrado && (
+            <div className="mt-4 bg-green-50 p-4 rounded border border-green-200 text-sm">
+              <p><strong>ID Interno:</strong> <span className="font-mono text-green-700">{clienteEncontrado.getId()}</span></p>
+              <p><strong>Nombre:</strong> {clienteEncontrado.getNombre()}</p>
+              <p><strong>Dirección:</strong> {clienteEncontrado.getDireccion()}</p>
+              <p><strong>Modalidad:</strong> {clienteEncontrado.getModalidadNegocio()} ({clienteEncontrado.getCantidadEmpleados()} emp.)</p>
+              <p><strong>Depósitos:</strong> {clienteEncontrado.getDepositos().length} registrados</p>
             </div>
-          ))}
+          )}
+        </div>
+
+        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm h-96 overflow-y-auto">
+          <h3 className="font-bold mb-4 flex items-center gap-2"><Users className="w-5 h-5" /> Directorio Actual</h3>
+          <div className="space-y-2">
+            {tablaClientesRef.current.obtenerValores().map(c => (
+              <div key={c.getId()} className="p-3 border rounded-lg text-sm bg-slate-50 flex justify-between items-center">
+                <div>
+                  <span className="font-bold text-slate-800">{c.getDocumento()}</span> - {c.getNombre()}
+                  <div className="text-xs text-slate-500">{c.getModalidadNegocio()}</div>
+                </div>
+                <div className="text-xs font-mono bg-slate-200 px-2 py-1 rounded text-slate-700">
+                  {c.getId()}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

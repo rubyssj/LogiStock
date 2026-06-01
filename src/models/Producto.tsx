@@ -1,3 +1,5 @@
+import { generador } from '../utils/generadorIds';
+
 export type CategoriaProducto = "electronica" | "alimentos" | "ropa" | "hogar" | "otros"; //categorizacion de productos 
 
 export class Producto { // se encarga de manejar los productos
@@ -10,18 +12,16 @@ export class Producto { // se encarga de manejar los productos
     private fechaIngreso: Date; //fecha de ingreso del producto
 
     constructor(
-        codigo: string,
         nombre: string,
         categoria: CategoriaProducto,
         precio: number,
         stockActual: number,
         stockMinimo: number = 5
-    ) { // si el relleno del producto esta vacio o solo tiene espacios, lanza error
-        if (!codigo.trim()) throw new Error("El codigo del producto no puede estar vacío."); //error de codigo
+    ) { 
         if (!nombre.trim()) throw new Error("El nombre del producto no puede estar vacío."); //error de nombre
         if (!categoria.trim()) throw new Error("La categoria del producto no puede estar vacía."); //error de categoria
         // este objeto en particular
-        this.codigo = codigo;
+        this.codigo = generador.nuevoIdProducto();
         this.nombre = nombre;
         this.categoria = categoria; //inicializa la categoria del producto
         this.precio = precio; //inicializa el precio del producto

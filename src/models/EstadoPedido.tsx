@@ -65,3 +65,4 @@ export class Pedido { // se encarga de manejar los pedidos
         return this.estado === "pendiente" || this.estado === "en_ruta"; // devuelve true si el estado es pendiente o en ruta
     }
 }
+

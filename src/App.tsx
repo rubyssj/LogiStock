@@ -1,5 +1,6 @@
 import React, { useState, useRef, FormEvent, useEffect } from "react";
 import { Cola, ColaInventario } from "./lib/dataStructures/colaInventario";
+import Inventario from './pages/Inventario';
 import { TablaHash } from "./lib/dataStructures/tablaHash";
 import { GrafoLogistica } from "./lib/dataStructures/grafoLogistica";
 import { Cliente, Pedido, Producto } from "./models";
@@ -297,55 +298,7 @@ export default function App() {
   );
 
   const renderInventario = () => {
-    const stockVisual = colaInventarioRef.current.mapearStockActual();
-
-    return (
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
-          <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><PlusCircle /> Ingresar Lote</h2>
-          {productoError && (
-              <div className="bg-red-50 text-red-700 p-3 rounded-md mb-4 text-sm font-medium border border-red-200">
-                  {productoError}
-              </div>
-          )}
-          <form onSubmit={handleIngresarLote} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium">Producto</label>
-              <input type="text" value={productoNombre} onChange={e => setProductoNombre(e.target.value)} className="w-full border p-2 rounded" placeholder="Ej: Termo" />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium">Precio</label>
-                <input type="number" value={productoPrecio} onChange={e => setProductoPrecio(e.target.value)} className="w-full border p-2 rounded" placeholder="Ej: 150" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium">Cantidad</label>
-                <input type="number" value={productoCantidad} onChange={e => setProductoCantidad(e.target.value)} className="w-full border p-2 rounded" min="1" />
-              </div>
-            </div>
-            <button type="submit" className="w-full bg-[#2E7D32] text-white py-2 rounded font-medium hover:bg-green-800">
-              Encolar en Inventario (FIFO)
-            </button>
-          </form>
-        </div>
-
-        <div className="bg-white p-6 rounded-xl border border-gray-200 h-96 overflow-y-auto">
-          <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Package /> Estado Cola (FIFO)</h2>
-          {stockVisual.length === 0 ? <p className="text-gray-500">Cola vacía</p> : (
-            <div className="space-y-2">
-              <div className="text-sm font-bold text-orange-500">↑ FRENTE (Próximos a salir)</div>
-              {stockVisual.map((p, i) => (
-                <div key={i} className="p-3 border rounded flex justify-between bg-gray-50">
-                  <span>{p.getNombre()} (ID: {p.getCodigo()})</span>
-                  <span className="font-mono text-sm text-gray-500">${p.getPrecio()}</span>
-                </div>
-              ))}
-              <div className="text-sm font-bold text-blue-500">↓ FINAL (Últimos en entrar)</div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
+    return <Inventario colaFisica={colaInventarioRef.current} />;
   };
 
   const agregarDepositoTemp = (e: FormEvent) => {
@@ -360,9 +313,9 @@ export default function App() {
       <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
         <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><User className="text-primary" /> Añadir Cliente</h2>
         {clienteError && (
-            <div className="bg-red-50 text-red-700 p-3 rounded-md mb-4 text-sm font-medium border border-red-200">
-                {clienteError}
-            </div>
+          <div className="bg-red-50 text-red-700 p-3 rounded-md mb-4 text-sm font-medium border border-red-200">
+            {clienteError}
+          </div>
         )}
         <form onSubmit={handleRegistrarCliente} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">

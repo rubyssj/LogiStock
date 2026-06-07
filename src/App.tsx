@@ -1,5 +1,6 @@
 import React, { useState, useRef, FormEvent, useEffect } from "react";
 import { Cola, ColaInventario } from "./lib/dataStructures/colaInventario";
+import { TablaHashInventario } from "./lib/dataStructures/tablaHashInventario";
 import Inventario from './pages/Inventario';
 import { TablaHash } from "./lib/dataStructures/tablaHash";
 import { GrafoLogistica } from "./lib/dataStructures/grafoLogistica";
@@ -27,6 +28,7 @@ export default function App() {
 
   const colaPedidosRef = useRef(new Cola<Pedido>());
   const colaInventarioRef = useRef(new ColaInventario());
+  const tablaProductosRef = useRef(new TablaHashInventario());
   const tablaClientesRef = useRef(new TablaHash<Cliente>());
   const grafoRutasRef = useRef(new GrafoLogistica());
 
@@ -87,6 +89,7 @@ export default function App() {
       setProductoError(null);
       const prod = new Producto(productoNombre, "otros", parseFloat(productoPrecio), 1);
       colaInventarioRef.current.ingresarLote(prod, parseInt(productoCantidad));
+      tablaProductosRef.current.registrar(prod);
       setProductoNombre(""); setProductoPrecio(""); setProductoCantidad("1");
       forceUpdate();
     } catch (error: any) {
@@ -298,7 +301,7 @@ export default function App() {
   );
 
   const renderInventario = () => {
-    return <Inventario colaFisica={colaInventarioRef.current} />;
+    return <Inventario colaFisica={colaInventarioRef.current} tablaProductos={tablaProductosRef.current} />;
   };
 
   const agregarDepositoTemp = (e: FormEvent) => {

@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Producto, CategoriaProducto } from '../models';
 import { ColaInventario } from '../lib/dataStructures/colaInventario';
+import { TablaHashInventario } from '../lib/dataStructures/tablaHashInventario';
 
 interface InventarioProps {
     colaFisica: ColaInventario;
+    tablaProductos: TablaHashInventario;
 }
 
-export default function Inventario({ colaFisica }: InventarioProps) {
+export default function Inventario({ colaFisica, tablaProductos }: InventarioProps) {
     const [stockRenderizado, setStockRenderizado] = useState<Producto[]>([]);
+    const [catalogoHash, setCatalogoHash] = useState<Producto[]>([]);
 
     // Estados del formulario extendido
     const [nombre, setNombre] = useState('');
@@ -18,12 +21,29 @@ export default function Inventario({ colaFisica }: InventarioProps) {
 
     const [cantidadDespacho, setCantidadDespacho] = useState('1');
 
+    const [buscarCodigo, setBuscarCodigo] = useState('');
+    const [productoEncontrado, setProductoEncontrado] = useState<Producto | null>(null);
+    const [busquedaSinResultado, setBusquedaSinResultado] = useState(false);
+
     useEffect(() => {
         actualizarPantalla();
     }, []);
 
     const actualizarPantalla = () => {
-        setStockRenderizado(colaFisica.mapearStockActual());
+        const cola = colaFisica.mapearStockActual();
+        setStockRenderizado(cola);
+        setCatalogoHash(tablaProductos.listarCatalogo());
+        if (productoEncontrado) {
+            const actualizado = tablaProductos.buscarPorCodigo(productoEncontrado.getCodigo());
+            setProductoEncontrado(actualizado);
+        }
+    };
+
+    const handleBuscarProducto = () => {
+        if (!buscarCodigo.trim()) return;
+        const encontrado = tablaProductos.buscarPorCodigo(buscarCodigo);
+        setProductoEncontrado(encontrado);
+        setBusquedaSinResultado(!encontrado);
     };
 
     // Cálculo de valor financiero del depósito
@@ -42,6 +62,7 @@ export default function Inventario({ colaFisica }: InventarioProps) {
         try {
             const nuevoProducto = new Producto(nombre, categoria, numPrecio, numCantidad, numMinimo);
             colaFisica.ingresarLote(nuevoProducto, numCantidad);
+            tablaProductos.registrar(nuevoProducto);
 
             setNombre('');
             setPrecio('');
@@ -71,7 +92,7 @@ export default function Inventario({ colaFisica }: InventarioProps) {
         <div className="p-6 max-w-6xl mx-auto space-y-6 bg-gray-50 rounded-xl shadow-sm">
 
             {/* --- DASHBOARD FINANCIERO Y DE STOCK --- */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-1">
                 <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
                     <p className="text-sm text-gray-500 font-bold uppercase tracking-wider">Cajas Físicas en Bodega</p>
                     <p className="text-3xl font-black text-gray-800 mt-1">{stockRenderizado.length}</p>
@@ -83,14 +104,70 @@ export default function Inventario({ colaFisica }: InventarioProps) {
                     </p>
                 </div>
                 <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-                    <p className="text-sm text-gray-500 font-bold uppercase tracking-wider">Lógica Operativa</p>
-                    <p className="text-lg font-bold text-blue-600 mt-2 flex items-center gap-2">
-                        ⏱️ FIFO - Tiempo O(1)
-                    </p>
+                    <p className="text-sm text-gray-500 font-bold uppercase tracking-wider">Productos Registrados</p>
+                    <p className="text-3xl font-black text-gray-800 mt-1">{catalogoHash.length}</p>
+                </div>
+                <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col justify-between">
+                    <p className="text-sm text-gray-500 font-bold uppercase tracking-wider">Buscar por Código</p>
+                    <div className="flex items-stretch gap-1.5 mt-1">
+                        <input
+                            type="text"
+                            value={buscarCodigo}
+                            onChange={e => { setBuscarCodigo(e.target.value); setBusquedaSinResultado(false); }}
+                            onKeyDown={e => e.key === 'Enter' && handleBuscarProducto()}
+                            placeholder="Ej: P-002"
+                            title="Buscar producto por código"
+                            className="flex-1 min-w-0 text-sm border border-gray-200 focus:border-gray-400 rounded-md px-2.5 py-2 font-mono outline-none bg-gray-50 focus:bg-white"
+                        />
+                        <button
+                            type="button"
+                            onClick={handleBuscarProducto}
+                            className="shrink-0 flex items-center justify-center w-9 border border-gray-200 rounded-md bg-gray-50 hover:bg-gray-100 text-gray-600 transition"
+                            title="Buscar"
+                        >
+                            🔍
+                        </button>
+                    </div>
                 </div>
             </div>
+            {(productoEncontrado || busquedaSinResultado) && (
+                <div className="mb-4">
+                    {productoEncontrado ? (
+                        <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 grid grid-cols-2 md:grid-cols-5 gap-x-6 gap-y-3 text-sm">
+                            <div>
+                                <p className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Código</p>
+                                <p className="font-mono font-semibold text-gray-800">{productoEncontrado.getCodigo()}</p>
+                            </div>
+                            <div>
+                                <p className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Producto</p>
+                                <p className="font-medium text-gray-800 truncate" title={productoEncontrado.getNombre()}>{productoEncontrado.getNombre()}</p>
+                            </div>
+                            <div>
+                                <p className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">En bodega</p>
+                                <p className="font-semibold text-gray-800">
+                                    {tablaProductos.contarUnidadesEnCola(productoEncontrado.getCodigo(), stockRenderizado)} cajas
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Precio</p>
+                                <p className="font-semibold text-green-700">₲ {productoEncontrado.getPrecio().toLocaleString('es-PY')}</p>
+                            </div>
+                            <div>
+                                <p className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Estado</p>
+                                <p className={`font-medium ${productoEncontrado.necesitaReabastecimiento() ? 'text-red-600' : 'text-gray-500'}`}>
+                                    {productoEncontrado.necesitaReabastecimiento() ? 'Stock bajo' : 'Normal'}
+                                </p>
+                            </div>
+                        </div>
+                    ) : (
+                        <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 text-right sm:text-left">
+                            No se encontró ese código.
+                        </p>
+                    )}
+                </div>
+            )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
 
                 {/* --- RECEPCIÓN DE MERCADERÍA --- */}
                 <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
@@ -189,6 +266,44 @@ export default function Inventario({ colaFisica }: InventarioProps) {
                     </button>
                 </div>
             </div>
+
+            {/* --- DIRECTORIO DE PRODUCTOS --- */}
+            {catalogoHash.length > 0 && (
+                <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-200">
+                    <div className="flex justify-between items-center border-b pb-3 mb-4">
+                        <h3 className="text-lg font-bold text-gray-800">Directorio de Productos</h3>
+                        <span className="text-xs text-gray-400">{catalogoHash.length} producto(s)</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="text-left text-gray-500 border-b">
+                                    <th className="pb-2 font-bold">Código</th>
+                                    <th className="pb-2 font-bold">Nombre</th>
+                                    <th className="pb-2 font-bold">Categoría</th>
+                                    <th className="pb-2 font-bold text-right">Precio (Gs.)</th>
+                                    <th className="pb-2 font-bold text-center">En Cola</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {catalogoHash.map(prod => (
+                                    <tr
+                                        key={prod.getCodigo()}
+                                        className={`border-b border-gray-50 hover:bg-gray-50 cursor-pointer ${productoEncontrado?.getCodigo() === prod.getCodigo() ? 'bg-blue-50' : ''}`}
+                                        onClick={() => { setBuscarCodigo(prod.getCodigo()); setProductoEncontrado(prod); setBusquedaSinResultado(false); }}
+                                    >
+                                        <td className="py-2 font-mono text-gray-600">{prod.getCodigo()}</td>
+                                        <td className="py-2 font-medium">{prod.getNombre()}</td>
+                                        <td className="py-2 capitalize">{prod.getCategoria()}</td>
+                                        <td className="py-2 text-right">{prod.getPrecio().toLocaleString('es-PY')}</td>
+                                        <td className="py-2 text-center font-bold">{tablaProductos.contarUnidadesEnCola(prod.getCodigo(), stockRenderizado)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
 
             {/* --- RENDERIZADO VISUAL DEL VECTOR (COLA) --- */}
             <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 overflow-hidden">

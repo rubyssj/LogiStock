@@ -168,16 +168,7 @@ export default function App() {
   const handleRegistrarPedido = (e: FormEvent) => {
     e.preventDefault();
 
-    if (!pedidoClienteId) {
-      alert("⚠️ Error: Debe seleccionar un cliente.");
-      return;
-    }
-
-    const client = tablaClientesRef.current.buscar(pedidoClienteId);
-    if (!client) {
-      alert("⚠️ Error: Cliente no encontrado.");
-      return;
-    }
+    const client = pedidoClienteId ? tablaClientesRef.current.buscar(pedidoClienteId) : null;
 
     if (pedidoLineas.length === 0) {
       alert("⚠️ Error: Debe agregar al menos un producto al pedido.");
@@ -213,11 +204,11 @@ export default function App() {
     const nuevoPedido = {
       id: `PED-${Date.now()}`,
       cliente: {
-        id: client.getId(),
-        nombre: client.getNombre(),
-        documento: client.getDocumento(),
-        telefono: pedidoTelefono || client.getTelefono(),
-        direccion: pedidoDireccion || client.getDireccion(),
+        id: client ? client.getId() : (pedidoClienteId || "GENERICO"),
+        nombre: client ? client.getNombre() : (pedidoClienteId ? `Cliente (${pedidoClienteId})` : "Consumidor Final"),
+        documento: client ? client.getDocumento() : (pedidoClienteId || "Sin Documento"),
+        telefono: pedidoTelefono || (client ? client.getTelefono() : "N/A"),
+        direccion: pedidoDireccion || (client ? client.getDireccion() : "N/A"),
       },
       lineas: pedidoLineas.map(linea => ({
         productoCodigo: linea.producto.getCodigo(),
@@ -879,24 +870,6 @@ export default function App() {
 
     return (
       <div className="max-w-[1280px] mx-auto space-y-6">
-        {/* Toggle sub-pestañas */}
-        <div className="flex justify-between items-center pb-4 border-b border-slate-200">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setPedidosTabActiveSection('crear')}
-              className={`px-4 py-2 text-sm font-bold rounded-xl transition-all cursor-pointer ${pedidosTabActiveSection === 'crear' ? 'bg-primary text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}
-            >
-              Crear Nuevo Pedido
-            </button>
-            <button
-              onClick={() => setPedidosTabActiveSection('historial')}
-              className={`px-4 py-2 text-sm font-bold rounded-xl transition-all cursor-pointer ${pedidosTabActiveSection === 'historial' ? 'bg-primary text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}
-            >
-              Historial de Pedidos ({listaPedidos.length})
-            </button>
-          </div>
-        </div>
-
         {pedidosTabActiveSection === 'crear' ? (
           <div className="space-y-6">
             {/* Cabecera del formulario */}
@@ -1246,6 +1219,17 @@ export default function App() {
                       {pedidoObservaciones.length}/300
                     </div>
                   </div>
+
+                  <div className="flex justify-end pt-2 border-t border-slate-50">
+                    <button
+                      type="button"
+                      onClick={() => setPedidosTabActiveSection('historial')}
+                      className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 hover:border-slate-350 shadow-xs"
+                    >
+                      <span className="material-symbols-outlined text-sm">history</span>
+                      <span>Historial de Pedidos ({listaPedidos.length})</span>
+                    </button>
+                  </div>
                 </div>
 
               </div>
@@ -1346,10 +1330,20 @@ export default function App() {
         ) : (
           /* Historial de Pedidos */
           <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] space-y-4">
-            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 border-b border-slate-50 pb-2">
-              <span className="material-symbols-outlined text-emerald-600">assignment</span>
-              <span>Historial de Pedidos Registrados</span>
-            </h2>
+            <div className="flex justify-between items-center border-b border-slate-50 pb-2 mb-2">
+              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <span className="material-symbols-outlined text-emerald-600">assignment</span>
+                <span>Historial de Pedidos Registrados</span>
+              </h2>
+              <button
+                type="button"
+                onClick={() => setPedidosTabActiveSection('crear')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-xl bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50 transition-all cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-sm">arrow_back</span>
+                <span>Volver a Crear Pedido</span>
+              </button>
+            </div>
 
             {listaPedidos.length === 0 ? (
               <div className="text-center py-12 text-slate-400 italic font-mono text-sm bg-slate-50 border border-dashed border-slate-200 rounded-2xl">

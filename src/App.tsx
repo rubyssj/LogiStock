@@ -7,10 +7,11 @@ import { GrafoLogistica } from "./lib/dataStructures/grafoLogistica";
 import { Cliente, Pedido, Producto } from "./models";
 import { generador } from "./utils/generadorIds";
 import { PackageOpen, Map as MapIcon, Truck, Search, PlusCircle, CheckCircle, Package, LayoutDashboard, Users, MapPin, User, Building } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import Rutas from './pages/Rutas';
+import { LinkedList } from "./lib/dataStructures/listaEnlazada";
 import sidebarLogo from "./assets/logotransparente.png";
 
 // Fix leaflet icon issue in React
@@ -23,6 +24,20 @@ L.Icon.Default.mergeOptions({
 
 type TabType = 'dashboard' | 'inventario' | 'rutas' | 'clientes';
 
+function LocationPicker({ position, setPosition }: { position: { lat: number, lng: number }, setPosition: (pos: { lat: number, lng: number }) => void }) {
+  useMapEvents({
+    click(e) {
+      setPosition({ lat: e.latlng.lat, lng: e.latlng.lng });
+    },
+  });
+
+  return (
+    <Marker position={[position.lat, position.lng]}>
+      <Popup>Ubicación exacta del depósito</Popup>
+    </Marker>
+  );
+}
+
 export default function App() {
   const [currentTab, setCurrentTab] = useState<TabType>('dashboard');
 
@@ -31,6 +46,14 @@ export default function App() {
   const tablaProductosRef = useRef(new TablaHashInventario());
   const tablaClientesRef = useRef(new TablaHash<Cliente>());
   const grafoRutasRef = useRef(new GrafoLogistica());
+  const historialRef = useRef(new LinkedList<{
+    operacion: string;
+    producto: string;
+    cantidad: number;
+    costo: number;
+    estado: string;
+    hora: string;
+  }>());
 
   const [, setTick] = useState(0);
   const forceUpdate = () => setTick(tick => tick + 1);
@@ -51,15 +74,16 @@ export default function App() {
   const [direccion, setDireccion] = useState("");
   const [modalidadNegocio, setModalidadNegocio] = useState<"MicroEmpresa" | "Emprendedor">("Emprendedor");
   const [cantidadEmpleados, setCantidadEmpleados] = useState("1");
-  const [depositosCliente, setDepositosCliente] = useState<{ nombre: string, direccion: string, ciudad: string, barrio: string }[]>([]);
-  const [depositoTemp, setDepositoTemp] = useState({ nombre: "", direccion: "", ciudad: "", barrio: "" });
+  const [depositosCliente, setDepositosCliente] = useState<{ nombre: string, direccion: string, ciudad: string, barrio: string, coordenadas: { lat: number, lng: number } }[]>([]);
+  const [depositoTemp, setDepositoTemp] = useState({ nombre: "", direccion: "", ciudad: "", barrio: "", coordenadas: { lat: -25.2637, lng: -57.5759 } });
   const [clienteError, setClienteError] = useState<string | null>(null);
 
   const [buscarClienteId, setBuscarClienteId] = useState("");
   const [clienteEncontrado, setClienteEncontrado] = useState<Cliente | null>(null);
 
-  // Cola de Despacho
+  // Cola de Despacho y Rutas Sugeridas
   const [pedidosEnTransito, setPedidosEnTransito] = useState<Producto[]>([]);
+  const [rutaSugerida, setRutaSugerida] = useState<{ origen: string, destino: string } | null>(null);
 
   useEffect(() => {
     // Inicializar Grafo
@@ -79,6 +103,24 @@ export default function App() {
     // Inicializar algunos clientes (Tabla Hash)
     const cliente1 = new Cliente("Juan Pérez", "juan@ejemplo.com", "0981234567", "4123456", "Calle Lambaré 123", "Emprendedor", "1", []);
     tablaClientesRef.current.insertar("4123456", cliente1);
+
+    // Poblado inicial del Historial (Lista Enlazada de Nilda)
+    historialRef.current.prepend({
+      operacion: 'Entrada Stock',
+      producto: "Yerba Mate 'El Campesino' (Lote Inicial)",
+      cantidad: 50,
+      costo: 1250000,
+      estado: 'COMPLETADO',
+      hora: 'Hace 2h'
+    });
+    historialRef.current.prepend({
+      operacion: 'Entrada Stock',
+      producto: "Aceite de Soja 'Soja Linda' (Lote Inicial)",
+      cantidad: 20,
+      costo: 300000,
+      estado: 'COMPLETADO',
+      hora: 'Hace 4h'
+    });
   }, []);
 
   const handleIngresarLote = (e: FormEvent) => {
@@ -90,6 +132,17 @@ export default function App() {
       const prod = new Producto(productoNombre, "otros", parseFloat(productoPrecio), 1);
       colaInventarioRef.current.ingresarLote(prod, parseInt(productoCantidad));
       tablaProductosRef.current.registrar(prod);
+
+      // Registrar en Historial (Lista Enlazada)
+      historialRef.current.prepend({
+        operacion: 'Entrada Stock',
+        producto: `${productoNombre} (Código #${prod.getCodigo()})`,
+        cantidad: parseInt(productoCantidad),
+        costo: parseFloat(productoPrecio) * parseInt(productoCantidad),
+        estado: 'COMPLETADO',
+        hora: new Date().toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' })
+      });
+
       setProductoNombre(""); setProductoPrecio(""); setProductoCantidad("1");
       forceUpdate();
     } catch (error: any) {
@@ -101,13 +154,11 @@ export default function App() {
     e.preventDefault();
     if (!clienteId || !nombre || !direccion) return;
 
-    const depositosFormales = depositosCliente.map(d => ({
+    const depositosFormales = depositosCliente.map((dep, index) => ({
       idNodo: generador.nuevoIdNodo(),
-      nombre: d.nombre,
-      direccion: d.direccion,
-      ciudad: d.ciudad,
-      barrio: d.barrio,
-      coordenadas: { lat: -25.3 + (Math.random() * 0.1 - 0.05), lng: -57.6 + (Math.random() * 0.1 - 0.05) }
+      nombre: dep.nombre,
+      direccion: dep.direccion + ", " + dep.barrio + ", " + dep.ciudad,
+      coordenadas: dep.coordenadas // ¡Ahora usa las coordenadas reales del mapa interactivo!
     }));
 
     try {
@@ -126,7 +177,17 @@ export default function App() {
 
       depositosFormales.forEach(dep => {
         grafoRutasRef.current.agregarPuntoEntrega(dep.idNodo, `${cliente.getNombre()} - ${dep.nombre}`, dep.coordenadas);
-        grafoRutasRef.current.conectarPuntos("deposito_central", dep.idNodo, Math.floor(Math.random() * 20) + 1);
+        grafoRutasRef.current.conectarPuntos("deposito_central", dep.idNodo, 5);
+      });
+
+      // Registrar en Historial (Lista Enlazada)
+      historialRef.current.prepend({
+        operacion: 'Nuevo Cliente',
+        producto: `${nombre} ${apellido} (RUC: ${clienteId})`,
+        cantidad: depositosFormales.length,
+        costo: 0,
+        estado: 'COMPLETADO',
+        hora: new Date().toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' })
       });
 
       setClienteId(""); setNombre(""); setApellido(""); setEmail(""); setTelefono(""); setDireccion("");
@@ -146,7 +207,7 @@ export default function App() {
 
 
   const renderDashboard = () => (
-    <div className="max-w-container-max mx-auto space-y-6">
+    <div className="max-w-container-max mx-auto space-y-6 animate-fade-in">
       {/* Cabecera del Dashboard */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-slate-150">
         <div>
@@ -167,25 +228,22 @@ export default function App() {
 
       {/* Summary Cards Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {/* Card 1: Total Productos */}
+        {/* Card 1: Total Cajas en Bodega */}
         <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.05)] transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[160px]">
-          {/* Fila Superior */}
           <div className="flex justify-between items-center mb-2">
             <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
               <span className="material-symbols-outlined text-lg">inventory</span>
             </div>
             <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100">
               <span className="material-symbols-outlined text-xs">trending_up</span>
-              +12% esta semana
+              Lote Activo
             </span>
           </div>
-          {/* Fila Media e Inferior */}
           <div className="flex justify-between items-end">
             <div>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Productos</p>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Cajas en Bodega (FIFO)</p>
               <h3 className="text-3xl font-black text-slate-800 mt-1">{colaInventarioRef.current.mapearStockActual().length}</h3>
             </div>
-            {/* Sparkline (Green) */}
             <div className="w-24 h-10 flex items-end">
               <svg className="w-full h-full" viewBox="0 0 100 30" preserveAspectRatio="none">
                 <path
@@ -200,25 +258,22 @@ export default function App() {
           </div>
         </div>
 
-        {/* Card 2: Pedidos Pendientes */}
+        {/* Card 2: Pedidos en Tránsito */}
         <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.05)] transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[160px]">
-          {/* Fila Superior */}
           <div className="flex justify-between items-center mb-2">
             <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center">
               <span className="material-symbols-outlined text-lg">pending_actions</span>
             </div>
             <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full border border-amber-100">
-              <span className="material-symbols-outlined text-xs">schedule</span>
-              Requiere atención
+              <span className="material-symbols-outlined text-xs">local_shipping</span>
+              En camino
             </span>
           </div>
-          {/* Fila Media e Inferior */}
           <div className="flex justify-between items-end">
             <div>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Pedidos Pendientes</p>
-              <h3 className="text-3xl font-black text-slate-800 mt-1">15</h3>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Cajas en Tránsito</p>
+              <h3 className="text-3xl font-black text-slate-800 mt-1">{pedidosEnTransito.length}</h3>
             </div>
-            {/* Sparkline (Orange) */}
             <div className="w-24 h-10 flex items-end">
               <svg className="w-full h-full" viewBox="0 0 100 30" preserveAspectRatio="none">
                 <path
@@ -235,23 +290,20 @@ export default function App() {
 
         {/* Card 3: Nodos de Ruta */}
         <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.05)] transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[160px]">
-          {/* Fila Superior */}
           <div className="flex justify-between items-center mb-2">
             <div className="w-10 h-10 bg-sky-50 text-sky-600 rounded-xl flex items-center justify-center">
               <span className="material-symbols-outlined text-lg">local_shipping</span>
             </div>
             <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 bg-sky-50 text-sky-700 rounded-full border border-sky-100">
               <span className="material-symbols-outlined text-xs">route</span>
-              Pedidos en ruta
+              Red de Grafos
             </span>
           </div>
-          {/* Fila Media e Inferior */}
           <div className="flex justify-between items-end">
             <div>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Nodos de Ruta</p>
-              <h3 className="text-3xl font-black text-slate-800 mt-1">{Object.keys((grafoRutasRef.current as any).puntos).length}</h3>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Nodos del Grafo</p>
+              <h3 className="text-3xl font-black text-slate-800 mt-1">{Object.keys(grafoRutasRef.current.getPuntosDeEntrega()).length}</h3>
             </div>
-            {/* Sparkline (Blue) */}
             <div className="w-24 h-10 flex items-end">
               <svg className="w-full h-full" viewBox="0 0 100 30" preserveAspectRatio="none">
                 <path
@@ -268,23 +320,20 @@ export default function App() {
 
         {/* Card 4: Clientes Hash Table */}
         <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.05)] transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[160px]">
-          {/* Fila Superior */}
           <div className="flex justify-between items-center mb-2">
             <div className="w-10 h-10 bg-fuchsia-50 text-fuchsia-600 rounded-xl flex items-center justify-center">
               <span className="material-symbols-outlined text-lg">groups</span>
             </div>
             <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 bg-fuchsia-50 text-fuchsia-700 rounded-full border border-fuchsia-100">
               <span className="material-symbols-outlined text-xs">trending_up</span>
-              +3 este mes
+              Tabla Hash
             </span>
           </div>
-          {/* Fila Media e Inferior */}
           <div className="flex justify-between items-end">
             <div>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Clientes Hash Table</p>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Clientes (Hash)</p>
               <h3 className="text-3xl font-black text-slate-800 mt-1">{tablaClientesRef.current.obtenerClaves().length}</h3>
             </div>
-            {/* Sparkline (Purple/Pink) */}
             <div className="w-24 h-10 flex items-end">
               <svg className="w-full h-full" viewBox="0 0 100 30" preserveAspectRatio="none">
                 <path
@@ -300,79 +349,24 @@ export default function App() {
         </div>
       </div>
 
-      {/* Central Section - Two Columns */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Column 1: Capacidad del Depósito */}
+      {/* Central Section - Rutas Activas */}
+      <div className="grid grid-cols-1 gap-6">
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col justify-between">
-          <div>
-            <h3 className="text-lg font-bold text-slate-800">Capacidad del Depósito</h3>
-            <p className="text-xs text-slate-400 mt-1">Uso de espacio físico total</p>
-          </div>
-          
-          {/* Donut Chart */}
-          <div className="flex justify-center items-center my-6 relative w-44 h-44 mx-auto">
-            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 180 180">
-              {/* Background circle */}
-              <circle
-                cx="90"
-                cy="90"
-                r="74"
-                stroke="#f1f5f9"
-                strokeWidth="16"
-                fill="transparent"
-              />
-              {/* Foreground circle */}
-              <circle
-                cx="90"
-                cy="90"
-                r="74"
-                stroke="#16a34a"
-                strokeWidth="16"
-                fill="transparent"
-                strokeDasharray={2 * Math.PI * 74}
-                strokeDashoffset={2 * Math.PI * 74 * (1 - 0.78)}
-                strokeLinecap="round"
-              />
-            </svg>
-            {/* Center label */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-3xl font-black text-slate-800 leading-none">78%</span>
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Ocupado</span>
-            </div>
-          </div>
-
-          {/* Available / Total Labels */}
-          <div className="grid grid-cols-2 gap-4 border-t border-slate-50 pt-4 text-center">
-            <div>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Disponible</p>
-              <p className="text-base font-black text-slate-700 mt-1">1.100 m²</p>
-            </div>
-            <div className="border-l border-slate-100">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total</p>
-              <p className="text-base font-black text-slate-700 mt-1">5.000 m²</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Column 2: Rutas Críticas en Progreso */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col justify-between">
           <div className="flex justify-between items-center mb-4">
             <div>
-              <h3 className="text-lg font-bold text-slate-800">Rutas Críticas en Progreso</h3>
-              <p className="text-xs text-slate-400 mt-1">Seguimiento de flota en tiempo real</p>
+              <h3 className="text-lg font-bold text-slate-800">Despachos y Rutas Activas</h3>
+              <p className="text-xs text-slate-400 mt-1">Seguimiento de entregas optimizadas con Dijkstra</p>
             </div>
             <button 
               onClick={() => setCurrentTab('rutas')} 
               className="text-xs font-bold text-primary hover:text-emerald-700 transition-colors flex items-center gap-1 cursor-pointer"
             >
-              Ver mapa de flota
+              Ver mapa de entregas
               <span className="material-symbols-outlined text-xs">arrow_forward</span>
             </button>
           </div>
 
-          {/* Route Cards */}
-          <div className="space-y-4">
-            {/* Route Card 1 */}
+          {rutaSugerida ? (
             <div className="border border-slate-100 rounded-xl p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors duration-200">
               <div className="flex justify-between items-start mb-3">
                 <div className="flex gap-3 items-center">
@@ -380,50 +374,37 @@ export default function App() {
                     <span className="material-symbols-outlined text-lg">local_shipping</span>
                   </div>
                   <div>
-                    <h4 className="text-sm font-bold text-slate-800">Camión #402 - Ruta Asunción/CDE</h4>
-                    <p className="text-xs text-slate-500 font-medium mt-0.5">Conductor: Carlos Martínez</p>
+                    <h4 className="text-sm font-bold text-slate-800">
+                      Envío en Tránsito: {grafoRutasRef.current.getPuntosDeEntrega()[rutaSugerida.origen]?.nombreCliente.split(" - ")[0]}
+                    </h4>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                      Recorrido: <span className="font-semibold text-slate-700">{grafoRutasRef.current.getPuntosDeEntrega()[rutaSugerida.origen]?.nombreCliente}</span> ➔ <span className="font-semibold text-slate-700">{grafoRutasRef.current.getPuntosDeEntrega()[rutaSugerida.destino]?.nombreCliente}</span>
+                    </p>
                   </div>
                 </div>
-                <span className="inline-flex items-center text-[10px] font-bold px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100">
-                  En Tiempo
+                <span className="inline-flex items-center text-[10px] font-bold px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100 animate-pulse">
+                  EN CAMINO
                 </span>
               </div>
-              {/* Progress Line */}
               <div className="w-full bg-slate-100 rounded-full h-1.5 mb-3">
-                <div className="bg-emerald-500 h-1.5 rounded-full" style={{ width: '70%' }}></div>
+                <div className="bg-emerald-500 h-1.5 rounded-full" style={{ width: '100%' }}></div>
               </div>
               <div className="flex justify-between text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                <span>Partida: 06:00 AM</span>
-                <span>Llegada Est.: 02:30 PM</span>
+                <span>Distancia (Dijkstra): {grafoRutasRef.current.calcularMejorRuta(rutaSugerida.origen, rutaSugerida.destino)?.distanciaTotal} km</span>
+                <span>Carga: {pedidosEnTransito.length} cajas</span>
               </div>
             </div>
-
-            {/* Route Card 2 */}
-            <div className="border border-slate-100 rounded-xl p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors duration-200">
-              <div className="flex justify-between items-start mb-3">
-                <div className="flex gap-3 items-center">
-                  <div className="p-2 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center">
-                    <span className="material-symbols-outlined text-lg">local_shipping</span>
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-800">Camión #115 - Distribución Urbana</h4>
-                    <p className="text-xs text-slate-500 font-medium mt-0.5">Conductor: Luis Ferreira</p>
-                  </div>
-                </div>
-                <span className="inline-flex items-center text-[10px] font-bold px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full border border-amber-100">
-                  Demorado (15m)
-                </span>
-              </div>
-              {/* Progress Line */}
-              <div className="w-full bg-slate-100 rounded-full h-1.5 mb-3">
-                <div className="bg-amber-500 h-1.5 rounded-full" style={{ width: '85%' }}></div>
-              </div>
-              <div className="flex justify-between text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                <span>Partida: 08:00 AM</span>
-                <span>Llegada Est.: 11:45 AM</span>
-              </div>
+          ) : (
+            <div className="text-center py-8 text-slate-400 bg-slate-50/50 rounded-xl border border-dashed border-slate-200 font-medium text-sm">
+              <p>No hay despachos en curso en este momento.</p>
+              <button 
+                onClick={() => setCurrentTab('inventario')} 
+                className="mt-2 text-xs text-primary font-bold hover:underline"
+              >
+                Preparar un despacho en el Inventario ➔
+              </button>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -432,15 +413,11 @@ export default function App() {
         <div className="flex justify-between items-center mb-6">
           <div>
             <h3 className="text-lg font-bold text-slate-800">Actividad Reciente del Almacén</h3>
-            <p className="text-xs text-slate-400 mt-1">Registro detallado de las últimas operaciones físicas</p>
+            <p className="text-xs text-slate-400 mt-1">Registro detallado (Lista Enlazada - Nilda Romira)</p>
           </div>
-          {/* Dropdown Selector */}
           <div className="relative">
             <select className="appearance-none bg-slate-50 border border-slate-200 text-xs font-bold text-slate-600 rounded-xl px-4 py-2 pr-8 focus:outline-none hover:bg-slate-100 transition-colors cursor-pointer">
               <option>Todos los eventos</option>
-              <option>Entradas</option>
-              <option>Salidas</option>
-              <option>Alertas</option>
             </select>
             <span className="material-symbols-outlined text-slate-400 text-sm absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
               keyboard_arrow_down
@@ -454,76 +431,59 @@ export default function App() {
             <thead>
               <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                 <th className="pb-3 pl-4">Operación</th>
-                <th className="pb-3">Producto</th>
+                <th className="pb-3">Detalle / Registro</th>
                 <th className="pb-3">Cantidad</th>
                 <th className="pb-3">Costo / Valor</th>
                 <th className="pb-3">Estado</th>
-                <th className="pb-3 pr-4 text-right">Hora</th>
+                <th className="pb-3 pr-4 text-right">Hora / Tiempo</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 text-sm">
-              {/* Row 1 */}
-              <tr className="hover:bg-slate-50/50 transition-colors">
-                <td className="py-4 pl-4 font-bold text-slate-700">
-                  <span className="inline-flex items-center gap-2">
-                    <span className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                      <span className="material-symbols-outlined text-base">login</span>
-                    </span>
-                    Entrada Stock
-                  </span>
-                </td>
-                <td className="py-4 text-slate-600 font-medium">Yerba Mate 'El Campesino' (Código #A102)</td>
-                <td className="py-4 text-slate-500 font-semibold">50 unidades</td>
-                <td className="py-4 text-emerald-700 font-black">₲ 1.250.000</td>
-                <td className="py-4">
-                  <span className="inline-flex items-center text-[11px] font-bold px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100">
-                    COMPLETADO
-                  </span>
-                </td>
-                <td className="py-4 pr-4 text-right text-xs text-slate-400 font-bold">Hace 2h</td>
-              </tr>
-
-              {/* Row 2 */}
-              <tr className="hover:bg-slate-50/50 transition-colors">
-                <td className="py-4 pl-4 font-bold text-slate-700">
-                  <span className="inline-flex items-center gap-2">
-                    <span className="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
-                      <span className="material-symbols-outlined text-base">logout</span>
-                    </span>
-                    Salida Stock
-                  </span>
-                </td>
-                <td className="py-4 text-slate-600 font-medium">Yerba Mate 'El Campesino' (Código #A102)</td>
-                <td className="py-4 text-slate-500 font-semibold">12 unidades</td>
-                <td className="py-4 text-rose-700 font-black">₲ 300.000</td>
-                <td className="py-4">
-                  <span className="inline-flex items-center text-[11px] font-bold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full border border-amber-100">
-                    EN PROCESO
-                  </span>
-                </td>
-                <td className="py-4 pr-4 text-right text-xs text-slate-400 font-bold">Hace 4h</td>
-              </tr>
-
-              {/* Row 3 */}
-              <tr className="hover:bg-slate-50/50 transition-colors">
-                <td className="py-4 pl-4 font-bold text-slate-700">
-                  <span className="inline-flex items-center gap-2">
-                    <span className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
-                      <span className="material-symbols-outlined text-base">warning</span>
-                    </span>
-                    Alerta Stock
-                  </span>
-                </td>
-                <td className="py-4 text-slate-600 font-medium">Aceite de Soja 'Soja Linda' (Código #S302)</td>
-                <td className="py-4 text-slate-500 font-semibold">5 unidades</td>
-                <td className="py-4 text-slate-500 font-black">₲ 75.000</td>
-                <td className="py-4">
-                  <span className="inline-flex items-center text-[11px] font-bold px-2.5 py-1 bg-rose-50 text-rose-700 rounded-full border border-rose-100">
-                    ALERTA
-                  </span>
-                </td>
-                <td className="py-4 pr-4 text-right text-xs text-slate-400 font-bold">Ayer</td>
-              </tr>
+              {historialRef.current.toArray().length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-6 text-center text-slate-400 italic">
+                    No hay operaciones registradas en el historial.
+                  </td>
+                </tr>
+              ) : (
+                historialRef.current.toArray().map((act, index) => (
+                  <tr key={index} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="py-4 pl-4 font-bold text-slate-700">
+                      <span className="inline-flex items-center gap-2">
+                        <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                          act.operacion.includes('Entrada') ? 'bg-emerald-50 text-emerald-600' :
+                          act.operacion.includes('Salida') ? 'bg-blue-50 text-blue-600' :
+                          'bg-purple-50 text-purple-600'
+                        }`}>
+                          <span className="material-symbols-outlined text-base">
+                            {act.operacion.includes('Entrada') ? 'login' :
+                             act.operacion.includes('Salida') ? 'logout' :
+                             'person_add'}
+                          </span>
+                        </span>
+                        {act.operacion}
+                      </span>
+                    </td>
+                    <td className="py-4 text-slate-600 font-medium">{act.producto}</td>
+                    <td className="py-4 text-slate-500 font-semibold">
+                      {act.cantidad > 0 ? `${act.cantidad} unidades` : '-'}
+                    </td>
+                    <td className={`py-4 font-black ${act.costo > 0 ? (act.operacion.includes('Entrada') ? 'text-emerald-700' : 'text-blue-700') : 'text-slate-400'}`}>
+                      {act.costo > 0 ? `₲ ${act.costo.toLocaleString('es-PY')}` : 'Gs. 0'}
+                    </td>
+                    <td className="py-4">
+                      <span className={`inline-flex items-center text-[11px] font-bold px-2.5 py-1 rounded-full border ${
+                        act.estado === 'COMPLETADO' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                        act.estado === 'EN CAMINO' ? 'bg-blue-50 text-blue-700 border-blue-100' :
+                        'bg-purple-50 text-purple-700 border-purple-100'
+                      }`}>
+                        {act.estado}
+                      </span>
+                    </td>
+                    <td className="py-4 pr-4 text-right text-xs text-slate-400 font-bold">{act.hora}</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -531,15 +491,45 @@ export default function App() {
     </div>
   );
 
-  const renderInventario = () => {
-    return <Inventario colaFisica={colaInventarioRef.current} tablaProductos={tablaProductosRef.current} />;
+  const handleDespachoRuta = (extraidos: Producto[], idOrigen: string, idDestino: string) => {
+    // 1. Cargamos los productos extraídos de la Cola en la "furgoneta virtual"
+    setPedidosEnTransito([...pedidosEnTransito, ...extraidos]);
+    
+    // 2. Guardamos la ruta sugerida usando el ORIGEN real elegido por el usuario
+    //    (ya no asumimos 'deposito_central', el usuario elige desde qué depósito sale)
+    setRutaSugerida({ origen: idOrigen, destino: idDestino });
+    
+    // 3. Registrar en Historial (Lista Enlazada)
+    const totalCosto = extraidos.reduce((sum, p) => sum + p.getPrecio(), 0);
+    const primerProd = extraidos.length > 0 ? extraidos[0].getNombre() : 'Productos varios';
+    const cod = extraidos.length > 0 ? extraidos[0].getCodigo() : '';
+    historialRef.current.prepend({
+      operacion: 'Salida Stock',
+      producto: `${primerProd} (Cod: ${cod})`,
+      cantidad: extraidos.length,
+      costo: totalCosto,
+      estado: 'EN CAMINO',
+      hora: new Date().toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' })
+    });
+
+    // 4. Salto automático a la pestaña Rutas para ver el mapa
+    setCurrentTab('rutas');
   };
 
-  const agregarDepositoTemp = (e: FormEvent) => {
-    e.preventDefault();
-    if (!depositoTemp.nombre || !depositoTemp.direccion) return;
-    setDepositosCliente([...depositosCliente, depositoTemp]);
-    setDepositoTemp({ nombre: "", direccion: "", ciudad: "", barrio: "" });
+  const renderInventario = () => {
+    return <Inventario
+      colaFisica={colaInventarioRef.current}
+      tablaProductos={tablaProductosRef.current}
+      nodosGrafo={grafoRutasRef.current.getPuntosDeEntrega()}
+      onDespacharRuta={handleDespachoRuta}
+    />;
+  };
+
+  const agregarDepositoTemp = () => {
+    if (depositoTemp.nombre && depositoTemp.direccion) {
+      setDepositosCliente([...depositosCliente, depositoTemp]);
+      setDepositoTemp({ nombre: "", direccion: "", ciudad: "", barrio: "", coordenadas: { lat: -25.2637, lng: -57.5759 } });
+    }
   };
 
   const renderClientes = () => (
@@ -608,10 +598,32 @@ export default function App() {
           <div className="bg-orange-50 p-4 rounded-md border border-orange-200">
             <h3 className="font-bold text-orange-800 mb-2 flex items-center gap-2"><Building className="w-4 h-4" /> Sucursales / Depósitos ({depositosCliente.length})</h3>
             <div className="grid grid-cols-2 gap-2 mb-2">
-              <input placeholder="Nombre (ej. Local Centro)" value={depositoTemp.nombre} onChange={e => setDepositoTemp({ ...depositoTemp, nombre: e.target.value })} className="border p-2 rounded text-sm" />
-              <input placeholder="Dirección exacta" value={depositoTemp.direccion} onChange={e => setDepositoTemp({ ...depositoTemp, direccion: e.target.value })} className="border p-2 rounded text-sm" />
-              <input placeholder="Ciudad" value={depositoTemp.ciudad} onChange={e => setDepositoTemp({ ...depositoTemp, ciudad: e.target.value })} className="border p-2 rounded text-sm" />
-              <input placeholder="Barrio" value={depositoTemp.barrio} onChange={e => setDepositoTemp({ ...depositoTemp, barrio: e.target.value })} className="border p-2 rounded text-sm" />
+              <input placeholder="Nombre (ej. Local Centro)" value={depositoTemp.nombre} onChange={e => setDepositoTemp({ ...depositoTemp, nombre: e.target.value })} className="border p-2 rounded text-sm outline-none focus:ring-1 focus:ring-orange-500" />
+              <input placeholder="Dirección exacta" value={depositoTemp.direccion} onChange={e => setDepositoTemp({ ...depositoTemp, direccion: e.target.value })} className="border p-2 rounded text-sm outline-none focus:ring-1 focus:ring-orange-500" />
+              <input placeholder="Ciudad" value={depositoTemp.ciudad} onChange={e => setDepositoTemp({ ...depositoTemp, ciudad: e.target.value })} className="border p-2 rounded text-sm outline-none focus:ring-1 focus:ring-orange-500" />
+              <input placeholder="Barrio" value={depositoTemp.barrio} onChange={e => setDepositoTemp({ ...depositoTemp, barrio: e.target.value })} className="border p-2 rounded text-sm outline-none focus:ring-1 focus:ring-orange-500" />
+            </div>
+
+            {/* MAPA INTERACTIVO ESTILO UBER */}
+            <div className="mb-3">
+              <label className="block text-sm font-bold text-orange-900 mb-1 flex items-center gap-1">
+                <MapPin className="w-4 h-4 text-orange-600" /> Ubicación exacta en el Mapa (Haz Clic)
+              </label>
+              <div className="h-48 rounded overflow-hidden border-2 border-orange-200 z-0 relative shadow-inner cursor-crosshair">
+                <MapContainer center={[-25.2637, -57.5759]} zoom={12} className="w-full h-full z-0">
+                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                  <LocationPicker
+                    position={depositoTemp.coordenadas}
+                    setPosition={(coords) => setDepositoTemp({ ...depositoTemp, coordenadas: coords })}
+                  />
+                </MapContainer>
+              </div>
+              <div className="flex justify-between items-center mt-1">
+                <p className="text-[10px] text-orange-600 italic">
+                  Lat: {depositoTemp.coordenadas.lat.toFixed(5)}, Lng: {depositoTemp.coordenadas.lng.toFixed(5)}
+                </p>
+                <p className="text-[10px] bg-orange-200 text-orange-800 px-2 py-0.5 rounded font-bold uppercase">Pin Actualizado</p>
+              </div>
             </div>
             <button type="button" onClick={agregarDepositoTemp} className="bg-orange-200 text-orange-800 px-3 py-1 text-sm font-bold rounded hover:bg-orange-300 w-full mb-3">
               + Añadir Depósito al Cliente
@@ -673,7 +685,13 @@ export default function App() {
     </div>
   );
 
-
+  const renderRutas = () => {
+    return <Rutas
+      grafo={grafoRutasRef.current}
+      pedidosEnTransito={pedidosEnTransito}
+      rutaSugerida={rutaSugerida}
+    />;
+  };
 
   return (
     <div className="bg-background text-on-background font-body-md min-h-screen flex">
@@ -752,7 +770,7 @@ export default function App() {
         <main className="flex-1 p-xl">
           {currentTab === 'dashboard' && renderDashboard()}
           {currentTab === 'inventario' && renderInventario()}
-          {currentTab === 'rutas' && <Rutas grafo={grafoRutasRef.current} pedidosEnTransito={pedidosEnTransito} />}
+          {currentTab === 'rutas' && renderRutas()}
           {currentTab === 'clientes' && renderClientes()}
         </main>
       </div>

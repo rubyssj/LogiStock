@@ -2,33 +2,58 @@ import React, { useState, useEffect } from 'react';
 import { Producto, CategoriaProducto } from '../models';
 import { ColaInventario } from '../lib/dataStructures/colaInventario';
 import { TablaHashInventario } from '../lib/dataStructures/tablaHashInventario';
+import { PuntoDeEntrega } from '../lib/dataStructures/grafoLogistica';
 
+/**
+ * INTERFAZ DE PROPS (InventarioProps)
+ * ---------------------------------------------------------------------------
+ * Aquí conectamos las Estructuras de Datos. 
+ * @param colaFisica La Cola FIFO que maneja el inventario.
+ * @param nodosGrafo Diccionario de Nodos (Sucursales/Clientes) provenientes del Grafo.
+ * @param onDespacharRuta Función "Callback" para avisar a App.tsx que el camión ya fue cargado y debe saltar a Rutas.
+ */
 interface InventarioProps {
     colaFisica: ColaInventario;
     tablaProductos: TablaHashInventario;
+    nodosGrafo: { [idNodo: string]: PuntoDeEntrega };
+    // El callback ahora recibe ORIGEN y DESTINO por separado para trazar la ruta completa
+    onDespacharRuta: (productosExtraidos: Producto[], idOrigen: string, idDestino: string) => void;
 }
 
-export default function Inventario({ colaFisica, tablaProductos }: InventarioProps) {
+export default function Inventario({ colaFisica, tablaProductos, nodosGrafo, onDespacharRuta }: InventarioProps) {
+    // 1. ESTADO DEL RENDERIZADO
+    // Guardamos una copia del array físico para poder pintarlo en la pantalla (React).
     const [stockRenderizado, setStockRenderizado] = useState<Producto[]>([]);
     const [catalogoHash, setCatalogoHash] = useState<Producto[]>([]);
 
-    // Estados del formulario extendido
+    // 2. ESTADOS DEL FORMULARIO DE INGRESO (Entrada a la Cola)
     const [nombre, setNombre] = useState('');
     const [categoria, setCategoria] = useState<CategoriaProducto>('electronica');
     const [precio, setPrecio] = useState('');
     const [cantidad, setCantidad] = useState('');
     const [stockMinimo, setStockMinimo] = useState('5');
 
+    // 3. ESTADOS DEL FORMULARIO DE DESPACHO (Salida de la Cola hacia el Grafo)
     const [cantidadDespacho, setCantidadDespacho] = useState('1');
+    const [tipoTraslado, setTipoTraslado] = useState<'entrega' | 'interno'>('entrega');
+    // Origen: desde qué depósito sale el camión
+    const [origenDespacho, setOrigenDespacho] = useState('');
+    // Destino: a qué sucursal/cliente llega el camión
+    const [destinoDespacho, setDestinoDespacho] = useState('');
 
     const [buscarCodigo, setBuscarCodigo] = useState('');
     const [productoEncontrado, setProductoEncontrado] = useState<Producto | null>(null);
     const [busquedaSinResultado, setBusquedaSinResultado] = useState(false);
 
+    // Array plano de nodos del Grafo para los selects
+    const listaDestinos = Object.values(nodosGrafo);
+
+    // Cuando el componente se monta por primera vez, leemos la Cola.
     useEffect(() => {
         actualizarPantalla();
     }, []);
 
+    // Función auxiliar para forzar a React a dibujar la Cola actualizada.
     const actualizarPantalla = () => {
         const cola = colaFisica.mapearStockActual();
         setStockRenderizado(cola);
@@ -46,11 +71,16 @@ export default function Inventario({ colaFisica, tablaProductos }: InventarioPro
         setBusquedaSinResultado(!encontrado);
     };
 
-    // Cálculo de valor financiero del depósito
+    // Calcula el valor inmovilizado iterando el stock. (Análisis O(N) de la Cola).
     const calcularCapitalTotal = () => {
         return stockRenderizado.reduce((total, prod) => total + prod.getPrecio(), 0);
     };
 
+    /**
+     * OPERACIÓN ENQUEUE (Encolar)
+     * -----------------------------------------------------------------------
+     * Se ejecuta al registrar ingreso de bodega. Inserta al final (Tail) de la Cola.
+     */
     const handleIngresarLote = (e: React.FormEvent) => {
         e.preventDefault();
         if (!nombre || !precio || !cantidad || !stockMinimo) return;
@@ -60,37 +90,65 @@ export default function Inventario({ colaFisica, tablaProductos }: InventarioPro
         const numMinimo = parseInt(stockMinimo, 10);
 
         try {
+            // Instanciamos el objeto de negocio Producto
             const nuevoProducto = new Producto(nombre, categoria, numPrecio, numCantidad, numMinimo);
+            // Lo ingresamos a nuestra estructura de datos personalizada (ColaInventario)
             colaFisica.ingresarLote(nuevoProducto, numCantidad);
             tablaProductos.registrar(nuevoProducto);
 
-            setNombre('');
-            setPrecio('');
-            setCantidad('');
+            // Limpiamos los campos visuales
+            setNombre(''); setPrecio(''); setCantidad('');
             actualizarPantalla();
-
         } catch (error: any) {
+            // El try-catch atrapa validaciones como "precio no puede ser negativo" definidas en la clase Producto.
             alert(`Error al registrar entrada: ${error.message}`);
         }
     };
 
+    /**
+     * OPERACIÓN DEQUEUE + CONEXIÓN AL GRAFO
+     * -----------------------------------------------------------------------
+     * Se ejecuta al presionar "Extraer Cajas y Rutar".
+     * Saca del FRENTE de la Cola (FIFO) y pasa el resultado al padre (App.tsx).
+     *
+     * Reglas de validación:
+     * - Modo "entrega": el usuario debe elegir de qué depósito parte y a qué cliente llega.
+     * - Modo "interno":  el usuario debe elegir dos depósitos distintos (A → B).
+     */
     const handleDespachar = () => {
         const numDespacho = parseInt(cantidadDespacho, 10);
         if (isNaN(numDespacho) || numDespacho <= 0) return;
 
-        const extraidos = colaFisica.despacharPedido(numDespacho);
-
-        if (extraidos.length === 0) {
-            alert("⚠️ Error: No hay mercadería suficiente para este despacho.");
+        // Validación: ambos campos (origen y destino) son obligatorios
+        if (!origenDespacho) {
+            alert("⚠️ Seleccione el Depósito de SALIDA del camión.");
+            return;
+        }
+        if (!destinoDespacho) {
+            alert("⚠️ Seleccione el Depósito o Cliente de LLEGADA.");
+            return;
+        }
+        // No puede ser el mismo nodo para ambos campos
+        if (origenDespacho === destinoDespacho) {
+            alert("⚠️ El origen y el destino no pueden ser el mismo punto.");
             return;
         }
 
+        // DEQUEUE: Extraemos N elementos del FRENTE (Front) de la Cola FIFO
+        const extraidos = colaFisica.despacharPedido(numDespacho);
+        if (extraidos.length === 0) {
+            alert("⚠️ No hay mercadería suficiente para este despacho.");
+            return;
+        }
+
+        // Llamamos al padre con el origen, destino y los productos.
+        // App.tsx disparará el salto a Rutas y ejecutará Dijkstra + OSRM.
+        onDespacharRuta(extraidos, origenDespacho, destinoDespacho);
         actualizarPantalla();
     };
 
     return (
         <div className="p-6 max-w-6xl mx-auto space-y-6 bg-gray-50 rounded-xl shadow-sm">
-
             {/* --- DASHBOARD FINANCIERO Y DE STOCK --- */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-1">
                 <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
@@ -168,12 +226,11 @@ export default function Inventario({ colaFisica, tablaProductos }: InventarioPro
             )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
-
-                {/* --- RECEPCIÓN DE MERCADERÍA --- */}
+                {/* --- RECEPCIÓN DE MERCADERÍA (ENQUEUE) --- */}
                 <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
                     <div className="border-b pb-3 mb-5">
                         <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                            📦 Entrada de Stock
+                            Entrada de Stock
                         </h3>
                         <p className="text-sm text-gray-500 mt-1">Registre el ingreso físico de mercadería al final de la cola.</p>
                     </div>
@@ -208,7 +265,7 @@ export default function Inventario({ colaFisica, tablaProductos }: InventarioPro
                             </div>
                             <div>
                                 <label className="block text-sm font-bold text-orange-600 mb-1">Alerta Stock Mínimo</label>
-                                <input type="number" value={stockMinimo} onChange={e => setStockMinimo(e.target.value)} required className="w-full border-2 border-orange-200 focus:border-orange-500 rounded-md p-2.5 text-center text-orange-700 font-bold" min="1" title="El sistema alertará cuando queden menos de estas unidades" />
+                                <input type="number" value={stockMinimo} onChange={e => setStockMinimo(e.target.value)} required className="w-full border-2 border-orange-200 focus:border-orange-500 rounded-md p-2.5 text-center text-orange-700 font-bold" min="1" />
                             </div>
                         </div>
 
@@ -218,41 +275,115 @@ export default function Inventario({ colaFisica, tablaProductos }: InventarioPro
                     </form>
                 </div>
 
-                {/* --- DESPACHO LOGÍSTICO (Estricto FIFO) --- */}
+                {/* --- DESPACHO LOGÍSTICO HACIA EL GRAFO (DEQUEUE) --- */}
                 <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 flex flex-col justify-between">
                     <div>
                         <div className="border-b pb-3 mb-5">
                             <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                                🚚 Salida Logística
+                                Preparar Traslado / Entrega
                             </h3>
-                            <p className="text-sm text-gray-500 mt-1">Extracción estricta FIFO. El sistema asigna automáticamente el lote más antiguo.</p>
+                            <p className="text-sm text-gray-500 mt-1">Conecta el Inventario FIFO con el Grafo de Rutas Dijkstra.</p>
                         </div>
 
-                        <div className="bg-blue-50 border border-blue-100 p-5 rounded-lg mb-6">
+                        <div className="bg-blue-50 border border-blue-100 p-5 rounded-lg mb-6 space-y-4">
 
-                            {/* Lector automático del Frente de la Cola */}
-                            {stockRenderizado.length > 0 ? (
-                                <div className="mb-4 bg-white p-3 rounded border border-blue-200 shadow-sm">
-                                    <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">Próximo en fila a despachar:</p>
-                                    <p className="text-lg font-black text-gray-800 truncate">{stockRenderizado[0].getNombre()}</p>
-                                    <p className="text-xs text-gray-500 mt-1 font-mono">ID: {stockRenderizado[0].getCodigo()}</p>
-                                </div>
-                            ) : (
-                                <div className="mb-4 bg-gray-100 p-3 rounded border border-gray-200 text-gray-500 text-sm text-center">
-                                    No hay mercancía en espera.
+                            {/* SELECTOR DE TIPO DE MOVIMIENTO */}
+                            <div>
+                                <label className="block text-xs font-bold text-blue-900 mb-1 uppercase">Tipo de Movimiento</label>
+                                <select
+                                    value={tipoTraslado}
+                                    onChange={e => {
+                                        // Al cambiar el tipo, limpiamos los selectores para evitar
+                                        // que quede seleccionado un nodo inválido del modo anterior.
+                                        setTipoTraslado(e.target.value as 'entrega' | 'interno');
+                                        setOrigenDespacho('');
+                                        setDestinoDespacho('');
+                                    }}
+                                    className="w-full border border-blue-200 rounded p-2 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-400"
+                                >
+                                    <option value="entrega">🛒 Entrega Final a Cliente</option>
+                                    <option value="interno">🔄 Traslado Interno (Depósito → Depósito)</option>
+                                </select>
+                            </div>
+
+                            {/* SELECTOR DE ORIGEN: Depósito desde donde sale el camión */}
+                            <div>
+                                <label className="block text-xs font-bold text-blue-900 mb-1 uppercase">
+                                    {tipoTraslado === 'entrega' ? '🏭 Depósito de Salida' : '🏭 Depósito Origen (A)'}
+                                </label>
+                                <select
+                                    value={origenDespacho}
+                                    onChange={e => setOrigenDespacho(e.target.value)}
+                                    className="w-full border border-blue-200 rounded p-2 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-400"
+                                >
+                                    <option value="">-- Seleccione punto de partida --</option>
+                                    {/* Filtramos el nodo que ya eligió como destino para evitar conflictos */}
+                                    {listaDestinos
+                                        .filter(n => n.idNodo !== destinoDespacho)
+                                        .map(nodo => (
+                                            <option key={nodo.idNodo} value={nodo.idNodo}>
+                                                {nodo.nombreCliente}
+                                            </option>
+                                        ))}
+                                </select>
+                            </div>
+
+                            {/* SELECTOR DE DESTINO: Depósito o Cliente al que llega */}
+                            <div>
+                                <label className="block text-xs font-bold text-blue-900 mb-1 uppercase">
+                                    {tipoTraslado === 'entrega' ? '📍 Dirección del Cliente (Destino)' : '📍 Depósito Destino (B)'}
+                                </label>
+                                <select
+                                    value={destinoDespacho}
+                                    onChange={e => setDestinoDespacho(e.target.value)}
+                                    className="w-full border border-blue-200 rounded p-2 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-400"
+                                >
+                                    <option value="">-- Seleccione destino --</option>
+                                    {/* Filtramos el nodo que ya eligió como origen para evitar duplicados */}
+                                    {listaDestinos
+                                        .filter(n => n.idNodo !== origenDespacho)
+                                        .map(nodo => (
+                                            <option key={nodo.idNodo} value={nodo.idNodo}>
+                                                {nodo.nombreCliente}
+                                            </option>
+                                        ))}
+                                </select>
+                            </div>
+
+                            {/* RESUMEN VISUAL de la operación seleccionada */}
+                            {origenDespacho && destinoDespacho && (
+                                <div className="bg-white rounded border border-blue-200 p-2 text-xs text-blue-800 font-bold text-center">
+                                    {nodosGrafo[origenDespacho]?.nombreCliente} 
+                                    <span className="text-orange-500 mx-2">→</span>
+                                    {nodosGrafo[destinoDespacho]?.nombreCliente}
+                                    <span className={`ml-2 px-2 py-0.5 rounded-full text-white text-[10px] ${tipoTraslado === 'entrega' ? 'bg-green-500' : 'bg-purple-500'}`}>
+                                        {tipoTraslado === 'entrega' ? 'Entrega' : 'Interno'}
+                                    </span>
                                 </div>
                             )}
 
-                            <label className="block text-sm font-bold text-blue-900 mb-2 uppercase tracking-wide">Cajas a extraer:</label>
-                            <input
-                                type="number"
-                                value={cantidadDespacho}
-                                onChange={e => setCantidadDespacho(e.target.value)}
-                                className="w-full border-2 border-blue-300 rounded-md p-4 text-2xl font-black text-center text-blue-800 focus:border-blue-500 outline-none"
-                                min="1"
-                                max={stockRenderizado.length || 1}
-                                disabled={stockRenderizado.length === 0}
-                            />
+                            <hr className="border-blue-200 border-dashed" />
+
+                            <div>
+                                <label className="block text-xs font-bold text-blue-900 mb-1 uppercase tracking-wide">Cajas a Extraer (FIFO):</label>
+                                <input
+                                    type="number"
+                                    value={cantidadDespacho}
+                                    onChange={e => setCantidadDespacho(e.target.value)}
+                                    className="w-full border border-blue-300 rounded-md p-3 text-xl font-black text-center text-blue-800 focus:border-blue-500 outline-none"
+                                    min="1"
+                                    max={stockRenderizado.length || 1}
+                                    disabled={stockRenderizado.length === 0}
+                                />
+                            </div>
+
+                            {stockRenderizado.length > 0 ? (
+                                <p className="text-[10px] text-blue-700 text-center font-bold">
+                                    Extraerá: {stockRenderizado[0].getNombre()} (Cod: {stockRenderizado[0].getCodigo()})
+                                </p>
+                            ) : (
+                                <p className="text-[10px] text-gray-500 text-center italic">Bodega vacía.</p>
+                            )}
                         </div>
                     </div>
 
@@ -260,9 +391,9 @@ export default function Inventario({ colaFisica, tablaProductos }: InventarioPro
                         onClick={handleDespachar}
                         disabled={stockRenderizado.length === 0}
                         className={`w-full font-bold py-4 rounded-md transition text-lg shadow-md flex justify-center items-center gap-2
-              ${stockRenderizado.length === 0 ? 'bg-gray-200 text-gray-400 cursor-not-allowed border border-gray-300' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+              ${stockRenderizado.length === 0 ? 'bg-gray-200 text-gray-400 cursor-not-allowed border border-gray-300' : 'bg-blue-600 text-white hover:bg-blue-700 active:scale-95'}`}
                     >
-                        {stockRenderizado.length === 0 ? 'Bodega Vacía' : 'Extraer Cajas y Rutar'}
+                        {stockRenderizado.length === 0 ? 'Sin Stock' : ' Extraer Cajas y Rutar'}
                     </button>
                 </div>
             </div>
@@ -306,6 +437,7 @@ export default function Inventario({ colaFisica, tablaProductos }: InventarioPro
             )}
 
             {/* --- RENDERIZADO VISUAL DEL VECTOR (COLA) --- */}
+            {/* Omitimos comentarios extensos en esta parte visual ya que es la misma de la versión anterior */}
             <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 overflow-hidden">
                 <div className="flex justify-between items-end border-b pb-3 mb-4">
                     <h3 className="text-lg font-bold text-gray-800">Mapa Físico del Depósito</h3>
@@ -331,7 +463,7 @@ export default function Inventario({ colaFisica, tablaProductos }: InventarioPro
                                         <div className="flex justify-between items-start mb-2">
                                             <span className="text-[10px] font-black text-gray-400 uppercase">Pos {index}</span>
                                             {prod.necesitaReabastecimiento() && (
-                                                <span title="Alerta: Quedan pocas unidades en la bodega en total" className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                                                <span title="Alerta: Quedan pocas unidades en la bodega" className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
                                             )}
                                         </div>
                                         <p className="font-bold text-gray-800 text-sm leading-tight mb-2 h-10 overflow-hidden" title={prod.getNombre()}>{prod.getNombre()}</p>

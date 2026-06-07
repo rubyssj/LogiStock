@@ -21,7 +21,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-type TabType = 'dashboard' | 'inventario' | 'rutas' | 'clientes';
+type TabType = 'dashboard' | 'inventario' | 'rutas' | 'clientes' | 'pedidos';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<TabType>('dashboard');
@@ -58,8 +58,30 @@ export default function App() {
   const [buscarClienteId, setBuscarClienteId] = useState("");
   const [clienteEncontrado, setClienteEncontrado] = useState<Cliente | null>(null);
 
-  // Cola de Despacho
+  // Estados del Formulario de Pedidos (Mockup Multi-producto)
   const [pedidosEnTransito, setPedidosEnTransito] = useState<Producto[]>([]);
+  const [pedidoClienteId, setPedidoClienteId] = useState("");
+  const [pedidoLineas, setPedidoLineas] = useState<{ producto: Producto; cantidad: number }[]>([]);
+  const [pedidoTelefono, setPedidoTelefono] = useState("");
+  const [pedidoDireccion, setPedidoDireccion] = useState("");
+  const [pedidoObservaciones, setPedidoObservaciones] = useState("");
+  const [pedidoFecha, setPedidoFecha] = useState(() => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  });
+  const [pedidoCreadoPor] = useState("Admin");
+  const [pedidosTabActiveSection, setPedidosTabActiveSection] = useState<'crear' | 'historial'>('crear');
+  const [listaPedidos, setListaPedidos] = useState<any[]>([]);
+
+  // Estados auxiliares para los buscadores de la pestaña Pedidos
+  const [clienteBusquedaQuery, setClienteBusquedaQuery] = useState("");
+  const [clienteDropdownAbierto, setClienteDropdownAbierto] = useState(false);
+  const [productoBusquedaQuery, setProductoBusquedaQuery] = useState("");
+  const [productoDropdownAbierto, setProductoDropdownAbierto] = useState(false);
+  const [productoSeleccionado, setProductoSeleccionado] = useState<Producto | null>(null);
+  const [cantidadSeleccionada, setCantidadSeleccionada] = useState(1);
+
 
   useEffect(() => {
     // Inicializar Grafo
@@ -143,6 +165,90 @@ export default function App() {
     setClienteEncontrado(c);
   };
 
+  const handleRegistrarPedido = (e: FormEvent) => {
+    e.preventDefault();
+
+    if (!pedidoClienteId) {
+      alert("⚠️ Error: Debe seleccionar un cliente.");
+      return;
+    }
+
+    const client = tablaClientesRef.current.buscar(pedidoClienteId);
+    if (!client) {
+      alert("⚠️ Error: Cliente no encontrado.");
+      return;
+    }
+
+    if (pedidoLineas.length === 0) {
+      alert("⚠️ Error: Debe agregar al menos un producto al pedido.");
+      return;
+    }
+
+    // Validar stock de todos los productos en el pedido
+    const stockActual = colaInventarioRef.current.mapearStockActual();
+    const stockPorCodigo: { [codigo: string]: number } = {};
+    for (const prod of stockActual) {
+      stockPorCodigo[prod.getCodigo()] = (stockPorCodigo[prod.getCodigo()] || 0) + 1;
+    }
+
+    for (const linea of pedidoLineas) {
+      const disponible = stockPorCodigo[linea.producto.getCodigo()] || 0;
+      if (linea.cantidad > disponible) {
+        alert(`⚠️ Error: Stock insuficiente para "${linea.producto.getNombre()}". Requerido: ${linea.cantidad}, Disponible: ${disponible}`);
+        return;
+      }
+    }
+
+    // Dar de baja del stock en la cola física (FIFO por producto)
+    for (const linea of pedidoLineas) {
+      colaInventarioRef.current.despacharProductoEspecifico(linea.producto.getCodigo(), linea.cantidad);
+    }
+
+    // Calcular totales
+    const subtotal = pedidoLineas.reduce((sum, item) => sum + item.producto.getPrecio() * item.cantidad, 0);
+    const iva = Math.round(subtotal * 0.10);
+    const total = subtotal + iva;
+
+    // Registrar el pedido
+    const nuevoPedido = {
+      id: `PED-${Date.now()}`,
+      cliente: {
+        id: client.getId(),
+        nombre: client.getNombre(),
+        documento: client.getDocumento(),
+        telefono: pedidoTelefono || client.getTelefono(),
+        direccion: pedidoDireccion || client.getDireccion(),
+      },
+      lineas: pedidoLineas.map(linea => ({
+        productoCodigo: linea.producto.getCodigo(),
+        nombre: linea.producto.getNombre(),
+        precio: linea.producto.getPrecio(),
+        cantidad: linea.cantidad,
+      })),
+      subtotal,
+      iva,
+      total,
+      observaciones: pedidoObservaciones,
+      fecha: pedidoFecha.replace('T', ' '),
+      estado: "Pendiente",
+      creadoPor: pedidoCreadoPor,
+    };
+
+    setListaPedidos([...listaPedidos, nuevoPedido]);
+
+    // Limpiar el formulario
+    setPedidoClienteId("");
+    setPedidoLineas([]);
+    setPedidoTelefono("");
+    setPedidoDireccion("");
+    setPedidoObservaciones("");
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    setPedidoFecha(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+
+    alert("✅ Pedido registrado con éxito y stock actualizado.");
+    forceUpdate();
+  };
 
 
   const renderDashboard = () => (
@@ -216,7 +322,10 @@ export default function App() {
           <div className="flex justify-between items-end">
             <div>
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Pedidos Pendientes</p>
-              <h3 className="text-3xl font-black text-slate-800 mt-1">15</h3>
+              <h3 className="text-3xl font-black text-slate-800 mt-1">
+                {listaPedidos.filter(p => p.estado.toLowerCase() === 'pendiente').length}
+              </h3>
+
             </div>
             {/* Sparkline (Orange) */}
             <div className="w-24 h-10 flex items-end">
@@ -308,7 +417,7 @@ export default function App() {
             <h3 className="text-lg font-bold text-slate-800">Capacidad del Depósito</h3>
             <p className="text-xs text-slate-400 mt-1">Uso de espacio físico total</p>
           </div>
-          
+
           {/* Donut Chart */}
           <div className="flex justify-center items-center my-6 relative w-44 h-44 mx-auto">
             <svg className="w-full h-full transform -rotate-90" viewBox="0 0 180 180">
@@ -361,8 +470,8 @@ export default function App() {
               <h3 className="text-lg font-bold text-slate-800">Rutas Críticas en Progreso</h3>
               <p className="text-xs text-slate-400 mt-1">Seguimiento de flota en tiempo real</p>
             </div>
-            <button 
-              onClick={() => setCurrentTab('rutas')} 
+            <button
+              onClick={() => setCurrentTab('rutas')}
               className="text-xs font-bold text-primary hover:text-emerald-700 transition-colors flex items-center gap-1 cursor-pointer"
             >
               Ver mapa de flota
@@ -673,6 +782,660 @@ export default function App() {
     </div>
   );
 
+  const renderPedidos = () => {
+    // List of all clients
+    const clientes = tablaClientesRef.current.obtenerValores();
+    // List of all catalog products
+    const productosCatalogo = tablaProductosRef.current.listarCatalogo();
+    // Physical stock list
+    const stockFisico = colaInventarioRef.current.mapearStockActual();
+
+    // Group stock by product code for real-time inventory checking
+    const stockPorCodigo: { [codigo: string]: number } = {};
+    for (const prod of stockFisico) {
+      stockPorCodigo[prod.getCodigo()] = (stockPorCodigo[prod.getCodigo()] || 0) + 1;
+    }
+
+    // Filter clients for searchable dropdown
+    const clientesFiltrados = clientes.filter(c =>
+      c.getNombre().toLowerCase().includes(clienteBusquedaQuery.toLowerCase()) ||
+      c.getDocumento().includes(clienteBusquedaQuery)
+    );
+
+    // Filter products for searchable dropdown
+    const productosFiltrados = productosCatalogo.filter(p =>
+      p.getNombre().toLowerCase().includes(productoBusquedaQuery.toLowerCase()) ||
+      p.getCodigo().toLowerCase().includes(productoBusquedaQuery.toLowerCase())
+    );
+
+    // Check if stock is sufficient for all lines in the order
+    const stockSuficienteParaTodo = pedidoLineas.every(linea => {
+      const disponible = stockPorCodigo[linea.producto.getCodigo()] || 0;
+      return linea.cantidad <= disponible;
+    });
+
+    // Subtotal, IVA, Total calculations
+    const subtotal = pedidoLineas.reduce((sum, item) => sum + item.producto.getPrecio() * item.cantidad, 0);
+    const iva = Math.round(subtotal * 0.10);
+    const total = subtotal + iva;
+
+    // Helper to add a product to the line items
+    const handleAgregarProducto = () => {
+      if (!productoSeleccionado) {
+        alert("⚠️ Seleccione un producto para agregar.");
+        return;
+      }
+      if (cantidadSeleccionada <= 0) {
+        alert("⚠️ La cantidad debe ser mayor a cero.");
+        return;
+      }
+
+      // Check if product already added
+      const indiceExistente = pedidoLineas.findIndex(item => item.producto.getCodigo() === productoSeleccionado.getCodigo());
+      if (indiceExistente !== -1) {
+        const nuevasLineas = [...pedidoLineas];
+        nuevasLineas[indiceExistente].cantidad += cantidadSeleccionada;
+        setPedidoLineas(nuevasLineas);
+      } else {
+        setPedidoLineas([...pedidoLineas, { producto: productoSeleccionado, cantidad: cantidadSeleccionada }]);
+      }
+
+      // Reset selection
+      setProductoSeleccionado(null);
+      setProductoBusquedaQuery("");
+      setCantidadSeleccionada(1);
+    };
+
+    // Helper to increment/decrement quantity in the table
+    const handleActualizarCantidadLinea = (codigo: string, delta: number) => {
+      const nuevasLineas = pedidoLineas.map(linea => {
+        if (linea.producto.getCodigo() === codigo) {
+          const nuevaCantidad = linea.cantidad + delta;
+          return { ...linea, cantidad: nuevaCantidad > 0 ? nuevaCantidad : 1 };
+        }
+        return linea;
+      });
+      setPedidoLineas(nuevasLineas);
+    };
+
+    // Helper to remove an item from the table
+    const handleEliminarLinea = (codigo: string) => {
+      setPedidoLineas(pedidoLineas.filter(linea => linea.producto.getCodigo() !== codigo));
+    };
+
+    // Clear form helper
+    const handleCancelarForm = () => {
+      setPedidoClienteId("");
+      setPedidoLineas([]);
+      setPedidoTelefono("");
+      setPedidoDireccion("");
+      setPedidoObservaciones("");
+      setClienteBusquedaQuery("");
+      setProductoBusquedaQuery("");
+      setProductoSeleccionado(null);
+      setCantidadSeleccionada(1);
+      alert("Formulario cancelado y limpiado.");
+    };
+
+    return (
+      <div className="max-w-[1280px] mx-auto space-y-6">
+        {/* Toggle sub-pestañas */}
+        <div className="flex justify-between items-center pb-4 border-b border-slate-200">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setPedidosTabActiveSection('crear')}
+              className={`px-4 py-2 text-sm font-bold rounded-xl transition-all cursor-pointer ${pedidosTabActiveSection === 'crear' ? 'bg-primary text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}
+            >
+              Crear Nuevo Pedido
+            </button>
+            <button
+              onClick={() => setPedidosTabActiveSection('historial')}
+              className={`px-4 py-2 text-sm font-bold rounded-xl transition-all cursor-pointer ${pedidosTabActiveSection === 'historial' ? 'bg-primary text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}
+            >
+              Historial de Pedidos ({listaPedidos.length})
+            </button>
+          </div>
+        </div>
+
+        {pedidosTabActiveSection === 'crear' ? (
+          <div className="space-y-6">
+            {/* Cabecera del formulario */}
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl flex items-center justify-center shadow-sm">
+                <span className="material-symbols-outlined text-2xl">shopping_cart</span>
+              </div>
+              <div>
+                <h1 className="text-2xl font-black text-slate-800 tracking-tight">Crear Nuevo Pedido</h1>
+              </div>
+            </div>
+
+            {/* Layout dos columnas */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+              {/* Columna Izquierda (2/3 de ancho) */}
+              <div className="lg:col-span-2 space-y-6">
+
+                {/* 1. Información del Cliente */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] space-y-4">
+                  <div className="flex items-center gap-2 text-slate-800 font-bold border-b border-slate-50 pb-2">
+                    <span className="material-symbols-outlined text-emerald-600">person</span>
+                    <span>1. Información del Cliente</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Cliente dropdown search */}
+                    <div className="relative">
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                        Cliente <span className="text-red-500">*</span>
+                      </label>
+                      <div className="flex gap-1">
+                        <div className="relative flex-1">
+                          <button
+                            type="button"
+                            onClick={() => setClienteDropdownAbierto(!clienteDropdownAbierto)}
+                            className="w-full text-left border border-slate-200 text-sm rounded-xl px-4 py-2.5 bg-white text-slate-700 hover:border-slate-300 transition-colors flex justify-between items-center cursor-pointer"
+                          >
+                            <span className="truncate">
+                              {pedidoClienteId
+                                ? (clientes.find(c => c.getId() === pedidoClienteId)?.getNombre() || "Seleccione un cliente")
+                                : "Seleccione un cliente"}
+                            </span>
+                            <span className="material-symbols-outlined text-slate-400 text-sm">keyboard_arrow_down</span>
+                          </button>
+
+                          {clienteDropdownAbierto && (
+                            <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-50 p-2 space-y-2 max-h-60 overflow-y-auto">
+                              <input
+                                type="text"
+                                placeholder="Buscar cliente..."
+                                value={clienteBusquedaQuery}
+                                onChange={(e) => setClienteBusquedaQuery(e.target.value)}
+                                className="w-full border border-slate-200 rounded-lg p-2 text-xs focus:outline-none focus:border-emerald-500"
+                              />
+                              <div className="divide-y divide-slate-50">
+                                {clientesFiltrados.length === 0 ? (
+                                  <div className="p-2 text-xs text-slate-400 italic text-center">No se encontraron clientes</div>
+                                ) : (
+                                  clientesFiltrados.map(c => (
+                                    <button
+                                      key={c.getId()}
+                                      type="button"
+                                      onClick={() => {
+                                        setPedidoClienteId(c.getId());
+                                        setPedidoTelefono(c.getTelefono());
+                                        setPedidoDireccion(c.getDireccion());
+                                        setClienteDropdownAbierto(false);
+                                        setClienteBusquedaQuery("");
+                                      }}
+                                      className="w-full text-left p-2 text-xs hover:bg-slate-50 rounded-lg transition-colors flex justify-between items-center"
+                                    >
+                                      <div>
+                                        <div className="font-bold text-slate-700">{c.getNombre()}</div>
+                                        <div className="text-[10px] text-slate-400">RUC/CI: {c.getDocumento()}</div>
+                                      </div>
+                                      <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-mono">{c.getId()}</span>
+                                    </button>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setClienteDropdownAbierto(true);
+                          }}
+                          className="shrink-0 flex items-center justify-center w-10 border border-emerald-600 rounded-xl bg-white hover:bg-emerald-50 text-emerald-600 transition cursor-pointer"
+                          title="Buscar cliente"
+                        >
+                          <span className="material-symbols-outlined text-lg">search</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Teléfono */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Teléfono</label>
+                      <input
+                        type="text"
+                        value={pedidoTelefono}
+                        onChange={(e) => setPedidoTelefono(e.target.value)}
+                        placeholder="Ej: 0981 123 456"
+                        className="w-full border border-slate-200 text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+
+                    {/* Dirección */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Dirección</label>
+                      <input
+                        type="text"
+                        value={pedidoDireccion}
+                        onChange={(e) => setPedidoDireccion(e.target.value)}
+                        placeholder="Ej: Asunción, Barrio Villa Morra"
+                        className="w-full border border-slate-200 text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Productos del Pedido */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] space-y-4">
+                  <div className="flex items-center gap-2 text-slate-800 font-bold border-b border-slate-50 pb-2">
+                    <span className="material-symbols-outlined text-emerald-600">package</span>
+                    <span>2. Productos del Pedido</span>
+                  </div>
+
+                  {/* Fila agregador */}
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+
+                    {/* Producto Select Buscable */}
+                    <div className="md:col-span-7 relative">
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Producto</label>
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setProductoDropdownAbierto(!productoDropdownAbierto)}
+                          className="w-full text-left border border-slate-200 text-sm rounded-xl px-4 py-2.5 bg-white text-slate-700 hover:border-slate-300 transition-colors flex justify-between items-center cursor-pointer"
+                        >
+                          <span className="truncate text-slate-600 text-left">
+                            {productoSeleccionado
+                              ? `${productoSeleccionado.getNombre()} (${productoSeleccionado.getCodigo()})`
+                              : "Buscar producto por nombre o código..."}
+                          </span>
+                          <span className="material-symbols-outlined text-slate-400 text-sm">keyboard_arrow_down</span>
+                        </button>
+
+                        {productoDropdownAbierto && (
+                          <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-50 p-2 space-y-2 max-h-60 overflow-y-auto">
+                            <input
+                              type="text"
+                              placeholder="Buscar producto por nombre o código..."
+                              value={productoBusquedaQuery}
+                              onChange={(e) => setProductoBusquedaQuery(e.target.value)}
+                              className="w-full border border-slate-200 rounded-lg p-2 text-xs focus:outline-none focus:border-emerald-500"
+                            />
+                            <div className="divide-y divide-slate-50">
+                              {productosFiltrados.length === 0 ? (
+                                <div className="p-2 text-xs text-slate-400 italic text-center">No se encontraron productos</div>
+                              ) : (
+                                productosFiltrados.map(p => {
+                                  const enCola = stockPorCodigo[p.getCodigo()] || 0;
+                                  return (
+                                    <button
+                                      key={p.getCodigo()}
+                                      type="button"
+                                      onClick={() => {
+                                        setProductoSeleccionado(p);
+                                        setProductoDropdownAbierto(false);
+                                        setProductoBusquedaQuery("");
+                                      }}
+                                      className="w-full text-left p-2 text-xs hover:bg-slate-50 rounded-lg transition-colors flex justify-between items-center"
+                                    >
+                                      <div>
+                                        <div className="font-bold text-slate-700">{p.getNombre()}</div>
+                                        <div className="text-[10px] text-slate-400">Cod: {p.getCodigo()} | Precio: Gs. {p.getPrecio().toLocaleString('es-PY')}</div>
+                                      </div>
+                                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${enCola > 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-red-50 text-red-700 border border-red-100'}`}>
+                                        Stock: {enCola}
+                                      </span>
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Selector de cantidad */}
+                    <div className="md:col-span-3">
+                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">Cantidad</label>
+                      <div className="flex items-center border border-slate-200 rounded-xl bg-white h-[42px] overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setCantidadSeleccionada(c => Math.max(1, c - 1))}
+                          className="w-10 h-full flex items-center justify-center text-slate-500 hover:bg-slate-50 active:bg-slate-100 transition-colors"
+                        >
+                          <span className="material-symbols-outlined text-sm font-bold">remove</span>
+                        </button>
+                        <input
+                          type="number"
+                          value={cantidadSeleccionada}
+                          onChange={(e) => setCantidadSeleccionada(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="flex-1 text-center font-bold text-slate-800 border-none outline-none focus:ring-0 text-sm h-full w-full"
+                          min="1"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setCantidadSeleccionada(c => c + 1)}
+                          className="w-10 h-full flex items-center justify-center text-slate-500 hover:bg-slate-50 active:bg-slate-100 transition-colors"
+                        >
+                          <span className="material-symbols-outlined text-sm font-bold">add</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Botón Agregar */}
+                    <div className="md:col-span-2">
+                      <button
+                        type="button"
+                        onClick={handleAgregarProducto}
+                        className="w-full bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl px-4 py-2.5 shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer h-[42px]"
+                      >
+                        <span className="material-symbols-outlined text-lg">add</span>
+                        <span>Agregar</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Tabla de productos agregados */}
+                  {pedidoLineas.length > 0 ? (
+                    <div className="overflow-x-auto border border-slate-100 rounded-xl bg-slate-50/50 mt-4">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider">
+                            <th className="p-3 pl-4 text-center">#</th>
+                            <th className="p-3">Producto</th>
+                            <th className="p-3">Código</th>
+                            <th className="p-3 text-right">Precio Unit.</th>
+                            <th className="p-3 text-center">Cantidad</th>
+                            <th className="p-3 text-right">Subtotal</th>
+                            <th className="p-3 pr-4 text-center">Acción</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-150 text-slate-700 bg-white">
+                          {pedidoLineas.map((linea, index) => {
+                            const cod = linea.producto.getCodigo();
+                            const disp = stockPorCodigo[cod] || 0;
+                            const stockInsuficiente = linea.cantidad > disp;
+                            return (
+                              <tr
+                                key={cod}
+                                className={`hover:bg-slate-50/50 transition-colors ${stockInsuficiente ? 'bg-red-50/40 hover:bg-red-50/60' : ''}`}
+                              >
+                                <td className="p-3 pl-4 text-center font-semibold text-slate-400">{index + 1}</td>
+                                <td className="p-3 font-semibold text-slate-800">
+                                  <div>{linea.producto.getNombre()}</div>
+                                  {stockInsuficiente && (
+                                    <div className="text-[10px] text-red-500 font-medium mt-0.5">⚠️ Stock en bodega: {disp} cajas</div>
+                                  )}
+                                </td>
+                                <td className="p-3 font-mono text-slate-500">{cod}</td>
+                                <td className="p-3 text-right font-medium">Gs. {linea.producto.getPrecio().toLocaleString('es-PY')}</td>
+                                <td className="p-3 text-center">
+                                  <div className="inline-flex items-center border border-slate-200 rounded-lg overflow-hidden bg-white shadow-xs">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleActualizarCantidadLinea(cod, -1)}
+                                      className="w-6 h-6 flex items-center justify-center hover:bg-slate-50 text-slate-500"
+                                    >
+                                      <span className="material-symbols-outlined text-[10px] font-bold">remove</span>
+                                    </button>
+                                    <span className="w-8 text-center font-bold text-slate-800 text-xs">{linea.cantidad}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleActualizarCantidadLinea(cod, 1)}
+                                      className="w-6 h-6 flex items-center justify-center hover:bg-slate-50 text-slate-500"
+                                    >
+                                      <span className="material-symbols-outlined text-[10px] font-bold">add</span>
+                                    </button>
+                                  </div>
+                                </td>
+                                <td className="p-3 text-right font-black text-slate-800">
+                                  Gs. {(linea.producto.getPrecio() * linea.cantidad).toLocaleString('es-PY')}
+                                </td>
+                                <td className="p-3 pr-4 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleEliminarLinea(cod)}
+                                    className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                    title="Quitar"
+                                  >
+                                    <span className="material-symbols-outlined text-lg">delete</span>
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-slate-400 bg-slate-50/50 border border-dashed border-slate-200 rounded-xl text-xs">
+                      No hay productos agregados a la lista.
+                    </div>
+                  )}
+
+                  {/* Banner de estado de stock */}
+                  {pedidoLineas.length > 0 && (
+                    <div className={`p-3.5 rounded-xl border flex items-center gap-2.5 text-xs font-bold transition-all ${stockSuficienteParaTodo
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-150'
+                        : 'bg-red-50 text-red-800 border-red-150'
+                      }`}>
+                      <span className="material-symbols-outlined text-lg">
+                        {stockSuficienteParaTodo ? 'check_circle' : 'warning'}
+                      </span>
+                      <span>
+                        {stockSuficienteParaTodo
+                          ? 'Stock disponible para todos los productos.'
+                          : 'Hay productos en la lista que superan el stock disponible en bodega.'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. Observaciones (Opcional) */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] space-y-4">
+                  <div className="flex items-center gap-2 text-slate-800 font-bold border-b border-slate-50 pb-2">
+                    <span className="material-symbols-outlined text-emerald-600">chat</span>
+                    <span>3. Observaciones (Opcional)</span>
+                  </div>
+
+                  <div className="relative">
+                    <textarea
+                      value={pedidoObservaciones}
+                      onChange={(e) => setPedidoObservaciones(e.target.value.slice(0, 300))}
+                      placeholder="Ingrese observaciones adicionales sobre el pedido..."
+                      className="w-full border border-slate-200 rounded-xl p-4 text-sm focus:outline-none focus:border-emerald-500 h-28 resize-none"
+                      maxLength={300}
+                    />
+                    <div className="absolute bottom-3 right-4 text-xs font-bold text-slate-400">
+                      {pedidoObservaciones.length}/300
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Columna Derecha (Sidebar 1/3) */}
+              <div className="space-y-6">
+
+                {/* Resumen del Pedido */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] space-y-5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-lg flex items-center justify-center shadow-xs">
+                      <span className="material-symbols-outlined text-lg">assignment</span>
+                    </div>
+                    <h3 className="font-bold text-slate-800 text-sm">Resumen del Pedido</h3>
+                  </div>
+
+                  <div className="space-y-3.5 border-t border-slate-50 pt-4">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-slate-400 font-bold uppercase tracking-wider">Subtotal</span>
+                      <span className="font-black text-slate-700">Gs. {subtotal.toLocaleString('es-PY')}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-slate-400 font-bold uppercase tracking-wider">IVA (10%)</span>
+                      <span className="font-black text-slate-700">Gs. {iva.toLocaleString('es-PY')}</span>
+                    </div>
+                    <div className="flex justify-between items-center border-t border-slate-100 pt-4 bg-emerald-50/30 p-2.5 rounded-xl border border-emerald-100/50">
+                      <span className="text-emerald-800 font-bold text-sm uppercase tracking-wider">Total</span>
+                      <span className="font-black text-xl text-emerald-700">Gs. {total.toLocaleString('es-PY')}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Box de Información */}
+                <div className="bg-blue-50 border border-blue-150 p-4 rounded-2xl flex items-start gap-3 shadow-[0_2px_6px_rgba(37,99,235,0.02)]">
+                  <span className="material-symbols-outlined text-blue-600 text-lg mt-0.5">info</span>
+                  <p className="text-xs text-blue-800 font-medium leading-relaxed">
+                    El pedido se registrará como <strong className="text-blue-700 font-bold">PENDIENTE</strong> y actualizará el inventario automáticamente.
+                  </p>
+                </div>
+
+                {/* Información Adicional */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-lg flex items-center justify-center shadow-xs">
+                      <span className="material-symbols-outlined text-lg">calendar_today</span>
+                    </div>
+                    <h3 className="font-bold text-slate-800 text-sm">Información Adicional</h3>
+                  </div>
+
+                  <div className="space-y-4 border-t border-slate-50 pt-4 text-xs">
+                    <div>
+                      <label className="block text-slate-400 font-bold uppercase tracking-wider mb-2">Fecha del Pedido</label>
+                      <input
+                        type="datetime-local"
+                        value={pedidoFecha}
+                        onChange={(e) => setPedidoFecha(e.target.value)}
+                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 font-semibold text-slate-700 focus:outline-none focus:border-emerald-500 bg-white"
+                      />
+                    </div>
+                    <div className="pt-2">
+                      <label className="block text-slate-400 font-bold uppercase tracking-wider mb-1.5">Creado por</label>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="material-symbols-outlined text-slate-400 text-base">person</span>
+                        <span className="font-bold text-slate-700">{pedidoCreadoPor}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Botones de acción */}
+                <div className="space-y-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleCancelarForm}
+                    className="w-full bg-white hover:bg-slate-50 text-slate-700 border border-slate-250 py-3 rounded-xl font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer text-sm"
+                  >
+                    <span className="material-symbols-outlined text-lg font-bold">close</span>
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRegistrarPedido}
+                    disabled={!stockSuficienteParaTodo || pedidoLineas.length === 0}
+                    className={`w-full py-3.5 rounded-xl font-bold transition-all shadow-md flex items-center justify-center gap-2 text-sm text-white cursor-pointer
+                      ${(!stockSuficienteParaTodo || pedidoLineas.length === 0)
+                        ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed shadow-none'
+                        : 'bg-emerald-700 hover:bg-emerald-800 active:scale-[0.99]'}`}
+                  >
+                    <span className="material-symbols-outlined text-lg">save</span>
+                    Confirmar Pedido
+                  </button>
+                </div>
+
+              </div>
+
+            </div>
+          </div>
+        ) : (
+          /* Historial de Pedidos */
+          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] space-y-4">
+            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 border-b border-slate-50 pb-2">
+              <span className="material-symbols-outlined text-emerald-600">assignment</span>
+              <span>Historial de Pedidos Registrados</span>
+            </h2>
+
+            {listaPedidos.length === 0 ? (
+              <div className="text-center py-12 text-slate-400 italic font-mono text-sm bg-slate-50 border border-dashed border-slate-200 rounded-2xl">
+                No hay pedidos registrados en el sistema.
+              </div>
+            ) : (
+              <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
+                {listaPedidos.map((pedido) => (
+                  <div
+                    key={pedido.id}
+                    className="border border-slate-150 rounded-xl p-5 bg-slate-50/50 hover:bg-slate-50 transition-colors shadow-xs"
+                  >
+                    <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-3 border-b border-slate-100 pb-3 mb-3">
+                      <div>
+                        <span className="text-xs font-bold text-slate-400 uppercase">Código del Pedido</span>
+                        <div className="text-base font-black text-slate-800">{pedido.id}</div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right text-xs">
+                          <div className="font-bold text-slate-500">Fecha: {pedido.fecha}</div>
+                          <div className="text-[10px] text-slate-400">Creado por: {pedido.creadoPor}</div>
+                        </div>
+                        <span className="inline-flex items-center text-[10px] font-bold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full border border-amber-100 uppercase">
+                          {pedido.estado}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Cliente */}
+                      <div className="bg-white p-3 rounded-lg border border-slate-100 space-y-1 text-xs">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Información de Facturación/Cliente</span>
+                        <div className="font-bold text-slate-800">{pedido.cliente.nombre}</div>
+                        <div><span className="text-slate-400">RUC/CI:</span> {pedido.cliente.documento}</div>
+                        <div><span className="text-slate-400">Teléfono:</span> {pedido.cliente.telefono}</div>
+                        <div className="truncate"><span className="text-slate-400">Dirección:</span> {pedido.cliente.direccion}</div>
+                      </div>
+
+                      {/* Productos y Observaciones */}
+                      <div className="space-y-3 text-xs">
+                        <div className="bg-white p-3 rounded-lg border border-slate-100 space-y-1">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Detalle de Productos</span>
+                          <div className="divide-y divide-slate-50 max-h-24 overflow-y-auto">
+                            {pedido.lineas.map((linea: any, idx: number) => (
+                              <div key={idx} className="flex justify-between py-1 font-medium">
+                                <span className="text-slate-600">{linea.nombre} (x{linea.cantidad})</span>
+                                <span className="font-bold text-slate-800">Gs. {(linea.precio * linea.cantidad).toLocaleString('es-PY')}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {pedido.observaciones && (
+                          <div className="bg-amber-50/50 border border-amber-100/50 p-2.5 rounded-lg text-slate-600 italic">
+                            <span className="font-bold text-[9px] text-amber-800 uppercase not-italic block mb-0.5">Observaciones:</span>
+                            "{pedido.observaciones}"
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Totales del pedido */}
+                    <div className="flex justify-end gap-6 border-t border-slate-100 pt-3 mt-4 text-xs font-bold">
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-400 uppercase tracking-wider">Subtotal:</span>
+                        <span className="text-slate-700">Gs. {pedido.subtotal.toLocaleString('es-PY')}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-400 uppercase tracking-wider">IVA (10%):</span>
+                        <span className="text-slate-700">Gs. {pedido.iva.toLocaleString('es-PY')}</span>
+                      </div>
+                      <div className="flex items-center gap-2 bg-emerald-50 px-3 py-1 rounded-lg border border-emerald-100">
+                        <span className="text-emerald-800 uppercase tracking-wider">Total:</span>
+                        <span className="text-emerald-700 text-sm font-black">Gs. {pedido.total.toLocaleString('es-PY')}</span>
+                      </div>
+                    </div>
+
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
 
   return (
@@ -711,6 +1474,16 @@ export default function App() {
             <button onClick={() => setCurrentTab('clientes')} className={`flex w-full items-center gap-3 font-medium px-4 py-3 transition-all duration-200 rounded-lg ${currentTab === 'clientes' ? 'text-primary font-bold border-r-4 border-primary bg-primary-container/25 rounded-l-lg rounded-r-none' : 'text-slate-600 hover:text-primary hover:bg-slate-50'}`}>
               <span className="material-symbols-outlined">groups</span>
               <span>Clientes</span>
+            </button>
+            <button
+              onClick={() => setCurrentTab('pedidos')}
+              className={`flex w-full items-center gap-3 font-medium px-4 py-3 transition-all duration-200 rounded-lg ${currentTab === 'pedidos'
+                  ? 'text-primary font-bold border-r-4 border-primary bg-primary-container/25 rounded-l-lg rounded-r-none'
+                  : 'text-slate-600 hover:text-primary hover:bg-slate-50'
+                }`}
+            >
+              <span className="material-symbols-outlined">shopping_cart</span>
+              <span>Pedidos</span>
             </button>
           </nav>
           <div className="mt-auto px-2 flex flex-col gap-1 pt-6 border-t border-slate-200 mx-4">
@@ -754,6 +1527,7 @@ export default function App() {
           {currentTab === 'inventario' && renderInventario()}
           {currentTab === 'rutas' && <Rutas grafo={grafoRutasRef.current} pedidosEnTransito={pedidosEnTransito} />}
           {currentTab === 'clientes' && renderClientes()}
+          {currentTab === 'pedidos' && renderPedidos()}
         </main>
       </div>
     </div>

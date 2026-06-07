@@ -150,6 +150,28 @@ export class ColaInventario {
   }
 
   /**
+   * Extrae y retorna productos específicos respetando el orden FIFO para ese producto.
+   * Filtra las primeras 'cantidad' unidades del producto indicado por su código.
+   */
+  public despacharProductoEspecifico(codigo: string, cantidad: number): Producto[] {
+    const productosDespachados: Producto[] = [];
+    const nuevosItems: Producto[] = [];
+    let count = 0;
+
+    for (const item of this.items) {
+      if (item.getCodigo() === codigo && count < cantidad) {
+        productosDespachados.push(item);
+        count++;
+      } else {
+        nuevosItems.push(item);
+      }
+    }
+
+    this.items = nuevosItems;
+    return productosDespachados;
+  }
+
+  /**
    * Retorna un estado actual de la cola (sin modificarla) para poder mapear y 
    * renderizar visualmente el orden de los productos en la interfaz de React.
    * 

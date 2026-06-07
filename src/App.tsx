@@ -1,14 +1,17 @@
 import React, { useState, useRef, FormEvent, useEffect } from "react";
 import { Cola, ColaInventario } from "./lib/dataStructures/colaInventario";
+import { TablaHashInventario } from "./lib/dataStructures/tablaHashInventario";
+import Inventario from './pages/Inventario';
 import { TablaHash } from "./lib/dataStructures/tablaHash";
 import { GrafoLogistica } from "./lib/dataStructures/grafoLogistica";
 import { Cliente, Pedido, Producto } from "./models";
 import { generador } from "./utils/generadorIds";
 import { PackageOpen, Map as MapIcon, Truck, Search, PlusCircle, CheckCircle, Package, LayoutDashboard, Users, MapPin, User, Building } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import Rutas from './pages/Rutas';
+import { LinkedList } from "./lib/dataStructures/listaEnlazada";
 import sidebarLogo from "./assets/logotransparente.png";
 
 // Fix leaflet icon issue in React
@@ -21,13 +24,36 @@ L.Icon.Default.mergeOptions({
 
 type TabType = 'dashboard' | 'inventario' | 'rutas' | 'clientes';
 
+function LocationPicker({ position, setPosition }: { position: { lat: number, lng: number }, setPosition: (pos: { lat: number, lng: number }) => void }) {
+  useMapEvents({
+    click(e) {
+      setPosition({ lat: e.latlng.lat, lng: e.latlng.lng });
+    },
+  });
+
+  return (
+    <Marker position={[position.lat, position.lng]}>
+      <Popup>Ubicación exacta del depósito</Popup>
+    </Marker>
+  );
+}
+
 export default function App() {
   const [currentTab, setCurrentTab] = useState<TabType>('dashboard');
 
   const colaPedidosRef = useRef(new Cola<Pedido>());
   const colaInventarioRef = useRef(new ColaInventario());
+  const tablaProductosRef = useRef(new TablaHashInventario());
   const tablaClientesRef = useRef(new TablaHash<Cliente>());
   const grafoRutasRef = useRef(new GrafoLogistica());
+  const historialRef = useRef(new LinkedList<{
+    operacion: string;
+    producto: string;
+    cantidad: number;
+    costo: number;
+    estado: string;
+    hora: string;
+  }>());
 
   const [, setTick] = useState(0);
   const forceUpdate = () => setTick(tick => tick + 1);
@@ -48,15 +74,16 @@ export default function App() {
   const [direccion, setDireccion] = useState("");
   const [modalidadNegocio, setModalidadNegocio] = useState<"MicroEmpresa" | "Emprendedor">("Emprendedor");
   const [cantidadEmpleados, setCantidadEmpleados] = useState("1");
-  const [depositosCliente, setDepositosCliente] = useState<{ nombre: string, direccion: string, ciudad: string, barrio: string }[]>([]);
-  const [depositoTemp, setDepositoTemp] = useState({ nombre: "", direccion: "", ciudad: "", barrio: "" });
+  const [depositosCliente, setDepositosCliente] = useState<{ nombre: string, direccion: string, ciudad: string, barrio: string, coordenadas: { lat: number, lng: number } }[]>([]);
+  const [depositoTemp, setDepositoTemp] = useState({ nombre: "", direccion: "", ciudad: "", barrio: "", coordenadas: { lat: -25.2637, lng: -57.5759 } });
   const [clienteError, setClienteError] = useState<string | null>(null);
 
   const [buscarClienteId, setBuscarClienteId] = useState("");
   const [clienteEncontrado, setClienteEncontrado] = useState<Cliente | null>(null);
 
-  // Cola de Despacho
+  // Cola de Despacho y Rutas Sugeridas
   const [pedidosEnTransito, setPedidosEnTransito] = useState<Producto[]>([]);
+  const [rutaSugerida, setRutaSugerida] = useState<{ origen: string, destino: string } | null>(null);
 
   useEffect(() => {
     // Inicializar Grafo
@@ -76,6 +103,24 @@ export default function App() {
     // Inicializar algunos clientes (Tabla Hash)
     const cliente1 = new Cliente("Juan Pérez", "juan@ejemplo.com", "0981234567", "4123456", "Calle Lambaré 123", "Emprendedor", "1", []);
     tablaClientesRef.current.insertar("4123456", cliente1);
+
+    // Poblado inicial del Historial (Lista Enlazada de Nilda)
+    historialRef.current.prepend({
+      operacion: 'Entrada Stock',
+      producto: "Yerba Mate 'El Campesino' (Lote Inicial)",
+      cantidad: 50,
+      costo: 1250000,
+      estado: 'COMPLETADO',
+      hora: 'Hace 2h'
+    });
+    historialRef.current.prepend({
+      operacion: 'Entrada Stock',
+      producto: "Aceite de Soja 'Soja Linda' (Lote Inicial)",
+      cantidad: 20,
+      costo: 300000,
+      estado: 'COMPLETADO',
+      hora: 'Hace 4h'
+    });
   }, []);
 
   const handleIngresarLote = (e: FormEvent) => {
@@ -86,6 +131,18 @@ export default function App() {
       setProductoError(null);
       const prod = new Producto(productoNombre, "otros", parseFloat(productoPrecio), 1);
       colaInventarioRef.current.ingresarLote(prod, parseInt(productoCantidad));
+      tablaProductosRef.current.registrar(prod);
+
+      // Registrar en Historial (Lista Enlazada)
+      historialRef.current.prepend({
+        operacion: 'Entrada Stock',
+        producto: `${productoNombre} (Código #${prod.getCodigo()})`,
+        cantidad: parseInt(productoCantidad),
+        costo: parseFloat(productoPrecio) * parseInt(productoCantidad),
+        estado: 'COMPLETADO',
+        hora: new Date().toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' })
+      });
+
       setProductoNombre(""); setProductoPrecio(""); setProductoCantidad("1");
       forceUpdate();
     } catch (error: any) {
@@ -97,13 +154,11 @@ export default function App() {
     e.preventDefault();
     if (!clienteId || !nombre || !direccion) return;
 
-    const depositosFormales = depositosCliente.map(d => ({
+    const depositosFormales = depositosCliente.map((dep, index) => ({
       idNodo: generador.nuevoIdNodo(),
-      nombre: d.nombre,
-      direccion: d.direccion,
-      ciudad: d.ciudad,
-      barrio: d.barrio,
-      coordenadas: { lat: -25.3 + (Math.random() * 0.1 - 0.05), lng: -57.6 + (Math.random() * 0.1 - 0.05) }
+      nombre: dep.nombre,
+      direccion: dep.direccion + ", " + dep.barrio + ", " + dep.ciudad,
+      coordenadas: dep.coordenadas // ¡Ahora usa las coordenadas reales del mapa interactivo!
     }));
 
     try {
@@ -122,7 +177,17 @@ export default function App() {
 
       depositosFormales.forEach(dep => {
         grafoRutasRef.current.agregarPuntoEntrega(dep.idNodo, `${cliente.getNombre()} - ${dep.nombre}`, dep.coordenadas);
-        grafoRutasRef.current.conectarPuntos("deposito_central", dep.idNodo, Math.floor(Math.random() * 20) + 1);
+        grafoRutasRef.current.conectarPuntos("deposito_central", dep.idNodo, 5);
+      });
+
+      // Registrar en Historial (Lista Enlazada)
+      historialRef.current.prepend({
+        operacion: 'Nuevo Cliente',
+        producto: `${nombre} ${apellido} (RUC: ${clienteId})`,
+        cantidad: depositosFormales.length,
+        costo: 0,
+        estado: 'COMPLETADO',
+        hora: new Date().toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' })
       });
 
       setClienteId(""); setNombre(""); setApellido(""); setEmail(""); setTelefono(""); setDireccion("");
@@ -142,217 +207,329 @@ export default function App() {
 
 
   const renderDashboard = () => (
-    <div className="max-w-container-max mx-auto">
+    <div className="max-w-container-max mx-auto space-y-6 animate-fade-in">
+      {/* Cabecera del Dashboard */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-slate-150">
+        <div>
+          <h1 className="text-3xl font-black text-slate-800 tracking-tight">Panel Principal</h1>
+          <p className="text-sm text-slate-500 mt-1 font-medium">Bienvenido de vuelta. Aquí está el resumen de operaciones para hoy.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button className="flex items-center gap-2 bg-white text-slate-700 border border-slate-200 hover:border-slate-300 hover:bg-slate-50 px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-all cursor-pointer">
+            <span className="material-symbols-outlined text-lg">download</span>
+            Exportar Reporte
+          </button>
+          <button className="flex items-center gap-2 bg-primary text-white hover:bg-primary/95 px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-all cursor-pointer">
+            <span className="material-symbols-outlined text-lg">calendar_today</span>
+            Ver Historial
+          </button>
+        </div>
+      </div>
+
       {/* Summary Cards Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-gutter mb-xl">
-        {/* Card 1 */}
-        <div className="bg-surface-container-lowest p-lg rounded-lg border border-outline-variant shadow-[0_2px_4px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_16px_rgba(0,0,0,0.08)] transition-shadow duration-300 flex flex-col justify-between">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <p className="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-wider">Total Productos</p>
-              <h3 className="text-h1 font-h1 text-on-surface mt-1">{colaInventarioRef.current.mapearStockActual().length}</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {/* Card 1: Total Cajas en Bodega */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.05)] transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[160px]">
+          <div className="flex justify-between items-center mb-2">
+            <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
+              <span className="material-symbols-outlined text-lg">inventory</span>
             </div>
-            <div className="p-2 bg-primary-container/10 rounded-full text-primary">
-              <span className="material-symbols-outlined">inventory</span>
-            </div>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100">
+              <span className="material-symbols-outlined text-xs">trending_up</span>
+              Lote Activo
+            </span>
           </div>
-          <div className="flex items-center text-sm text-primary font-medium mt-2">
-            <span className="material-symbols-outlined text-sm mr-1">trending_up</span>
-            <span>+12% esta semana</span>
+          <div className="flex justify-between items-end">
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Cajas en Bodega (FIFO)</p>
+              <h3 className="text-3xl font-black text-slate-800 mt-1">{colaInventarioRef.current.mapearStockActual().length}</h3>
+            </div>
+            <div className="w-24 h-10 flex items-end">
+              <svg className="w-full h-full" viewBox="0 0 100 30" preserveAspectRatio="none">
+                <path
+                  d="M 0 25 C 20 10, 40 28, 60 12 C 80 5, 90 22, 100 18"
+                  fill="none"
+                  stroke="#16a34a"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
           </div>
         </div>
-        {/* Card 2 */}
-        <div className="bg-surface-container-lowest p-lg rounded-lg border border-outline-variant shadow-[0_2px_4px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_16px_rgba(0,0,0,0.08)] transition-shadow duration-300 flex flex-col justify-between">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <p className="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-wider">Pedidos Pendientes</p>
-              <h3 className="text-h1 font-h1 text-on-surface mt-1">15</h3>
+
+        {/* Card 2: Pedidos en Tránsito */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.05)] transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[160px]">
+          <div className="flex justify-between items-center mb-2">
+            <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center">
+              <span className="material-symbols-outlined text-lg">pending_actions</span>
             </div>
-            <div className="p-2 bg-tertiary-container/10 rounded-full text-tertiary">
-              <span className="material-symbols-outlined">pending_actions</span>
-            </div>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full border border-amber-100">
+              <span className="material-symbols-outlined text-xs">local_shipping</span>
+              En camino
+            </span>
           </div>
-          <div className="flex items-center text-sm text-outline font-medium mt-2">
-            <span className="material-symbols-outlined text-sm mr-1">schedule</span>
-            <span>Requiere atención</span>
+          <div className="flex justify-between items-end">
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Cajas en Tránsito</p>
+              <h3 className="text-3xl font-black text-slate-800 mt-1">{pedidosEnTransito.length}</h3>
+            </div>
+            <div className="w-24 h-10 flex items-end">
+              <svg className="w-full h-full" viewBox="0 0 100 30" preserveAspectRatio="none">
+                <path
+                  d="M 0 15 C 20 28, 40 10, 60 25 C 80 30, 90 15, 100 20"
+                  fill="none"
+                  stroke="#d97706"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
           </div>
         </div>
-        {/* Card 3 */}
-        <div className="bg-surface-container-lowest p-lg rounded-lg border border-outline-variant shadow-[0_2px_4px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_16px_rgba(0,0,0,0.08)] transition-shadow duration-300 flex flex-col justify-between">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <p className="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-wider">Nodos de Ruta</p>
-              <h3 className="text-h1 font-h1 text-on-surface mt-1">{Object.keys((grafoRutasRef.current as any).puntos).length}</h3>
+
+        {/* Card 3: Nodos de Ruta */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.05)] transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[160px]">
+          <div className="flex justify-between items-center mb-2">
+            <div className="w-10 h-10 bg-sky-50 text-sky-600 rounded-xl flex items-center justify-center">
+              <span className="material-symbols-outlined text-lg">local_shipping</span>
             </div>
-            <div className="p-2 bg-primary-container/10 rounded-full text-primary">
-              <span className="material-symbols-outlined">local_shipping</span>
-            </div>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 bg-sky-50 text-sky-700 rounded-full border border-sky-100">
+              <span className="material-symbols-outlined text-xs">route</span>
+              Red de Grafos
+            </span>
           </div>
-          <div className="flex items-center text-sm text-outline font-medium mt-2">
-            <span className="material-symbols-outlined text-sm mr-1">route</span>
-            <span>Nodos mapeados en el grafo</span>
+          <div className="flex justify-between items-end">
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Nodos del Grafo</p>
+              <h3 className="text-3xl font-black text-slate-800 mt-1">{Object.keys(grafoRutasRef.current.getPuntosDeEntrega()).length}</h3>
+            </div>
+            <div className="w-24 h-10 flex items-end">
+              <svg className="w-full h-full" viewBox="0 0 100 30" preserveAspectRatio="none">
+                <path
+                  d="M 0 20 C 25 30, 40 5, 60 15 C 80 25, 90 10, 100 10"
+                  fill="none"
+                  stroke="#0284c7"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
           </div>
         </div>
-        {/* Card 4 */}
-        <div className="bg-surface-container-lowest p-lg rounded-lg border border-outline-variant shadow-[0_2px_4px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_16px_rgba(0,0,0,0.08)] transition-shadow duration-300 flex flex-col justify-between">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <p className="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-wider">Clientes Hash Table</p>
-              <h3 className="text-h1 font-h1 text-on-surface mt-1">{tablaClientesRef.current.obtenerClaves().length}</h3>
+
+        {/* Card 4: Clientes Hash Table */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.05)] transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[160px]">
+          <div className="flex justify-between items-center mb-2">
+            <div className="w-10 h-10 bg-fuchsia-50 text-fuchsia-600 rounded-xl flex items-center justify-center">
+              <span className="material-symbols-outlined text-lg">groups</span>
             </div>
-            <div className="p-2 bg-primary-container/10 rounded-full text-primary">
-              <span className="material-symbols-outlined">groups</span>
-            </div>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 bg-fuchsia-50 text-fuchsia-700 rounded-full border border-fuchsia-100">
+              <span className="material-symbols-outlined text-xs">trending_up</span>
+              Tabla Hash
+            </span>
           </div>
-          <div className="flex items-center text-sm text-primary font-medium mt-2">
-            <span className="material-symbols-outlined text-sm mr-1">trending_up</span>
-            <span>+3 este mes</span>
+          <div className="flex justify-between items-end">
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Clientes (Hash)</p>
+              <h3 className="text-3xl font-black text-slate-800 mt-1">{tablaClientesRef.current.obtenerClaves().length}</h3>
+            </div>
+            <div className="w-24 h-10 flex items-end">
+              <svg className="w-full h-full" viewBox="0 0 100 30" preserveAspectRatio="none">
+                <path
+                  d="M 0 22 C 20 12, 40 28, 60 10 C 80 5, 90 25, 100 15"
+                  fill="none"
+                  stroke="#d01c8b"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Main Content Split */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-gutter">
-        {/* Actividad Reciente (Bento Grid Style) */}
-        <div className="lg:col-span-2 bg-surface-container-lowest rounded-xl border border-outline-variant p-lg shadow-[0_2px_4px_rgba(0,0,0,0.05)]">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-h3 font-h3 text-on-surface">Actividad Reciente</h3>
-            <button className="text-sm font-medium text-primary hover:text-primary transition-colors">Ver todo</button>
+      {/* Central Section - Rutas Activas */}
+      <div className="grid grid-cols-1 gap-6">
+        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col justify-between">
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h3 className="text-lg font-bold text-slate-800">Despachos y Rutas Activas</h3>
+              <p className="text-xs text-slate-400 mt-1">Seguimiento de entregas optimizadas con Dijkstra</p>
+            </div>
+            <button 
+              onClick={() => setCurrentTab('rutas')} 
+              className="text-xs font-bold text-primary hover:text-emerald-700 transition-colors flex items-center gap-1 cursor-pointer"
+            >
+              Ver mapa de entregas
+              <span className="material-symbols-outlined text-xs">arrow_forward</span>
+            </button>
           </div>
-          <div className="space-y-4">
-            {/* Log Entry 1 */}
-            <div className="flex items-start gap-4 p-4 rounded-lg hover:bg-surface-container-low transition-colors duration-200 border border-transparent hover:border-surface-variant">
-              <div className="w-10 h-10 rounded-full bg-primary-container/10 flex items-center justify-center text-primary flex-shrink-0">
-                <span className="material-symbols-outlined text-md">add_box</span>
+
+          {rutaSugerida ? (
+            <div className="border border-slate-100 rounded-xl p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors duration-200">
+              <div className="flex justify-between items-start mb-3">
+                <div className="flex gap-3 items-center">
+                  <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
+                    <span className="material-symbols-outlined text-lg">local_shipping</span>
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-800">
+                      Envío en Tránsito: {grafoRutasRef.current.getPuntosDeEntrega()[rutaSugerida.origen]?.nombreCliente.split(" - ")[0]}
+                    </h4>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                      Recorrido: <span className="font-semibold text-slate-700">{grafoRutasRef.current.getPuntosDeEntrega()[rutaSugerida.origen]?.nombreCliente}</span> ➔ <span className="font-semibold text-slate-700">{grafoRutasRef.current.getPuntosDeEntrega()[rutaSugerida.destino]?.nombreCliente}</span>
+                    </p>
+                  </div>
+                </div>
+                <span className="inline-flex items-center text-[10px] font-bold px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100 animate-pulse">
+                  EN CAMINO
+                </span>
               </div>
-              <div className="flex-1">
-                <h4 className="text-body-lg font-body-lg text-on-surface font-medium">Entrada de Mercadería - Código #A102</h4>
-                <p className="text-body-md font-body-md text-on-surface-variant mt-1">Se recibieron 50 unidades de Yerba Mate 'El Campesino'.</p>
+              <div className="w-full bg-slate-100 rounded-full h-1.5 mb-3">
+                <div className="bg-emerald-500 h-1.5 rounded-full" style={{ width: '100%' }}></div>
               </div>
-              <div className="text-label-sm font-label-sm text-outline text-right">
-                <span>Hace 2h</span>
-              </div>
-            </div>
-            {/* Log Entry 2 */}
-            <div className="flex items-start gap-4 p-4 rounded-lg hover:bg-surface-container-low transition-colors duration-200 border border-transparent hover:border-surface-variant">
-              <div className="w-10 h-10 rounded-full bg-primary-container/10 flex items-center justify-center text-primary flex-shrink-0">
-                <span className="material-symbols-outlined text-md">route</span>
-              </div>
-              <div className="flex-1">
-                <h4 className="text-body-lg font-body-lg text-on-surface font-medium">Ruta a Asunción Iniciada</h4>
-                <p className="text-body-md font-body-md text-on-surface-variant mt-1">Vehículo PY-104 en camino con 12 pedidos.</p>
-              </div>
-              <div className="text-label-sm font-label-sm text-outline text-right">
-                <span>Hace 4h</span>
-              </div>
-            </div>
-            {/* Log Entry 3 */}
-            <div className="flex items-start gap-4 p-4 rounded-lg hover:bg-surface-container-low transition-colors duration-200 border border-transparent hover:border-surface-variant">
-              <div className="w-10 h-10 rounded-full bg-tertiary-container/10 flex items-center justify-center text-tertiary flex-shrink-0">
-                <span className="material-symbols-outlined text-md">warning</span>
-              </div>
-              <div className="flex-1">
-                <h4 className="text-body-lg font-body-lg text-on-surface font-medium">Stock Bajo Detectado</h4>
-                <p className="text-body-md font-body-md text-on-surface-variant mt-1">Aceite de Soja 'Soja Linda' por debajo del mínimo (5 unidades).</p>
-              </div>
-              <div className="text-label-sm font-label-sm text-outline text-right">
-                <span>Ayer</span>
+              <div className="flex justify-between text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                <span>Distancia (Dijkstra): {grafoRutasRef.current.calcularMejorRuta(rutaSugerida.origen, rutaSugerida.destino)?.distanciaTotal} km</span>
+                <span>Carga: {pedidosEnTransito.length} cajas</span>
               </div>
             </div>
+          ) : (
+            <div className="text-center py-8 text-slate-400 bg-slate-50/50 rounded-xl border border-dashed border-slate-200 font-medium text-sm">
+              <p>No hay despachos en curso en este momento.</p>
+              <button 
+                onClick={() => setCurrentTab('inventario')} 
+                className="mt-2 text-xs text-primary font-bold hover:underline"
+              >
+                Preparar un despacho en el Inventario ➔
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Bottom Section - Activity Table */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800">Actividad Reciente del Almacén</h3>
+            <p className="text-xs text-slate-400 mt-1">Registro detallado (Lista Enlazada - Nilda Romira)</p>
+          </div>
+          <div className="relative">
+            <select className="appearance-none bg-slate-50 border border-slate-200 text-xs font-bold text-slate-600 rounded-xl px-4 py-2 pr-8 focus:outline-none hover:bg-slate-100 transition-colors cursor-pointer">
+              <option>Todos los eventos</option>
+            </select>
+            <span className="material-symbols-outlined text-slate-400 text-sm absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+              keyboard_arrow_down
+            </span>
           </div>
         </div>
 
-        {/* Quick Actions / Status */}
-        <div className="bg-surface-container-lowest rounded-xl border border-outline-variant p-lg shadow-[0_2px_4px_rgba(0,0,0,0.05)]">
-          <h3 className="text-h3 font-h3 text-on-surface mb-6">Estado del Sistema</h3>
-          <div className="mb-8">
-            <div className="flex justify-between mb-2">
-              <span className="text-body-md font-body-md text-on-surface">Capacidad del Depósito</span>
-              <span className="text-body-md font-body-md text-on-surface font-medium">78%</span>
-            </div>
-            <div className="w-full bg-surface-variant rounded-full h-2.5">
-              <div className="bg-primary h-2.5 rounded-full" style={{ width: '78%' }}></div>
-            </div>
-          </div>
-          <div className="space-y-3">
-            <h4 className="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-wider mb-2">Acciones Rápidas</h4>
-            <button className="w-full flex items-center justify-between p-3 border border-outline-variant rounded-lg hover:border-primary-container hover:bg-surface-container-low transition-colors text-left group">
-              <div className="flex items-center gap-3">
-                <span className="material-symbols-outlined text-outline group-hover:text-primary transition-colors">qr_code_scanner</span>
-                <span className="text-body-md font-body-md text-on-surface font-medium">Escanear Código</span>
-              </div>
-              <span className="material-symbols-outlined text-outline group-hover:text-primary transition-colors text-sm">chevron_right</span>
-            </button>
-            <button className="w-full flex items-center justify-between p-3 border border-outline-variant rounded-lg hover:border-primary-container hover:bg-surface-container-low transition-colors text-left group">
-              <div className="flex items-center gap-3">
-                <span className="material-symbols-outlined text-outline group-hover:text-primary transition-colors">description</span>
-                <span className="text-body-md font-body-md text-on-surface font-medium">Generar Reporte</span>
-              </div>
-              <span className="material-symbols-outlined text-outline group-hover:text-primary transition-colors text-sm">chevron_right</span>
-            </button>
-          </div>
+        {/* Structured Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                <th className="pb-3 pl-4">Operación</th>
+                <th className="pb-3">Detalle / Registro</th>
+                <th className="pb-3">Cantidad</th>
+                <th className="pb-3">Costo / Valor</th>
+                <th className="pb-3">Estado</th>
+                <th className="pb-3 pr-4 text-right">Hora / Tiempo</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50 text-sm">
+              {historialRef.current.toArray().length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-6 text-center text-slate-400 italic">
+                    No hay operaciones registradas en el historial.
+                  </td>
+                </tr>
+              ) : (
+                historialRef.current.toArray().map((act, index) => (
+                  <tr key={index} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="py-4 pl-4 font-bold text-slate-700">
+                      <span className="inline-flex items-center gap-2">
+                        <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                          act.operacion.includes('Entrada') ? 'bg-emerald-50 text-emerald-600' :
+                          act.operacion.includes('Salida') ? 'bg-blue-50 text-blue-600' :
+                          'bg-purple-50 text-purple-600'
+                        }`}>
+                          <span className="material-symbols-outlined text-base">
+                            {act.operacion.includes('Entrada') ? 'login' :
+                             act.operacion.includes('Salida') ? 'logout' :
+                             'person_add'}
+                          </span>
+                        </span>
+                        {act.operacion}
+                      </span>
+                    </td>
+                    <td className="py-4 text-slate-600 font-medium">{act.producto}</td>
+                    <td className="py-4 text-slate-500 font-semibold">
+                      {act.cantidad > 0 ? `${act.cantidad} unidades` : '-'}
+                    </td>
+                    <td className={`py-4 font-black ${act.costo > 0 ? (act.operacion.includes('Entrada') ? 'text-emerald-700' : 'text-blue-700') : 'text-slate-400'}`}>
+                      {act.costo > 0 ? `₲ ${act.costo.toLocaleString('es-PY')}` : 'Gs. 0'}
+                    </td>
+                    <td className="py-4">
+                      <span className={`inline-flex items-center text-[11px] font-bold px-2.5 py-1 rounded-full border ${
+                        act.estado === 'COMPLETADO' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                        act.estado === 'EN CAMINO' ? 'bg-blue-50 text-blue-700 border-blue-100' :
+                        'bg-purple-50 text-purple-700 border-purple-100'
+                      }`}>
+                        {act.estado}
+                      </span>
+                    </td>
+                    <td className="py-4 pr-4 text-right text-xs text-slate-400 font-bold">{act.hora}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
   );
 
-  const renderInventario = () => {
-    const stockVisual = colaInventarioRef.current.mapearStockActual();
+  const handleDespachoRuta = (extraidos: Producto[], idOrigen: string, idDestino: string) => {
+    // 1. Cargamos los productos extraídos de la Cola en la "furgoneta virtual"
+    setPedidosEnTransito([...pedidosEnTransito, ...extraidos]);
+    
+    // 2. Guardamos la ruta sugerida usando el ORIGEN real elegido por el usuario
+    //    (ya no asumimos 'deposito_central', el usuario elige desde qué depósito sale)
+    setRutaSugerida({ origen: idOrigen, destino: idDestino });
+    
+    // 3. Registrar en Historial (Lista Enlazada)
+    const totalCosto = extraidos.reduce((sum, p) => sum + p.getPrecio(), 0);
+    const primerProd = extraidos.length > 0 ? extraidos[0].getNombre() : 'Productos varios';
+    const cod = extraidos.length > 0 ? extraidos[0].getCodigo() : '';
+    historialRef.current.prepend({
+      operacion: 'Salida Stock',
+      producto: `${primerProd} (Cod: ${cod})`,
+      cantidad: extraidos.length,
+      costo: totalCosto,
+      estado: 'EN CAMINO',
+      hora: new Date().toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' })
+    });
 
-    return (
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
-          <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><PlusCircle /> Ingresar Lote</h2>
-          {productoError && (
-              <div className="bg-red-50 text-red-700 p-3 rounded-md mb-4 text-sm font-medium border border-red-200">
-                  {productoError}
-              </div>
-          )}
-          <form onSubmit={handleIngresarLote} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium">Producto</label>
-              <input type="text" value={productoNombre} onChange={e => setProductoNombre(e.target.value)} className="w-full border p-2 rounded" placeholder="Ej: Termo" />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium">Precio</label>
-                <input type="number" value={productoPrecio} onChange={e => setProductoPrecio(e.target.value)} className="w-full border p-2 rounded" placeholder="Ej: 150" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium">Cantidad</label>
-                <input type="number" value={productoCantidad} onChange={e => setProductoCantidad(e.target.value)} className="w-full border p-2 rounded" min="1" />
-              </div>
-            </div>
-            <button type="submit" className="w-full bg-[#2E7D32] text-white py-2 rounded font-medium hover:bg-green-800">
-              Encolar en Inventario (FIFO)
-            </button>
-          </form>
-        </div>
-
-        <div className="bg-white p-6 rounded-xl border border-gray-200 h-96 overflow-y-auto">
-          <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><Package /> Estado Cola (FIFO)</h2>
-          {stockVisual.length === 0 ? <p className="text-gray-500">Cola vacía</p> : (
-            <div className="space-y-2">
-              <div className="text-sm font-bold text-orange-500">↑ FRENTE (Próximos a salir)</div>
-              {stockVisual.map((p, i) => (
-                <div key={i} className="p-3 border rounded flex justify-between bg-gray-50">
-                  <span>{p.getNombre()} (ID: {p.getCodigo()})</span>
-                  <span className="font-mono text-sm text-gray-500">${p.getPrecio()}</span>
-                </div>
-              ))}
-              <div className="text-sm font-bold text-blue-500">↓ FINAL (Últimos en entrar)</div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
+    // 4. Salto automático a la pestaña Rutas para ver el mapa
+    setCurrentTab('rutas');
   };
 
-  const agregarDepositoTemp = (e: FormEvent) => {
-    e.preventDefault();
-    if (!depositoTemp.nombre || !depositoTemp.direccion) return;
-    setDepositosCliente([...depositosCliente, depositoTemp]);
-    setDepositoTemp({ nombre: "", direccion: "", ciudad: "", barrio: "" });
+  const renderInventario = () => {
+    return <Inventario
+      colaFisica={colaInventarioRef.current}
+      tablaProductos={tablaProductosRef.current}
+      nodosGrafo={grafoRutasRef.current.getPuntosDeEntrega()}
+      onDespacharRuta={handleDespachoRuta}
+    />;
+  };
+
+  const agregarDepositoTemp = () => {
+    if (depositoTemp.nombre && depositoTemp.direccion) {
+      setDepositosCliente([...depositosCliente, depositoTemp]);
+      setDepositoTemp({ nombre: "", direccion: "", ciudad: "", barrio: "", coordenadas: { lat: -25.2637, lng: -57.5759 } });
+    }
   };
 
   const renderClientes = () => (
@@ -360,9 +537,9 @@ export default function App() {
       <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
         <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><User className="text-primary" /> Añadir Cliente</h2>
         {clienteError && (
-            <div className="bg-red-50 text-red-700 p-3 rounded-md mb-4 text-sm font-medium border border-red-200">
-                {clienteError}
-            </div>
+          <div className="bg-red-50 text-red-700 p-3 rounded-md mb-4 text-sm font-medium border border-red-200">
+            {clienteError}
+          </div>
         )}
         <form onSubmit={handleRegistrarCliente} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -421,10 +598,32 @@ export default function App() {
           <div className="bg-orange-50 p-4 rounded-md border border-orange-200">
             <h3 className="font-bold text-orange-800 mb-2 flex items-center gap-2"><Building className="w-4 h-4" /> Sucursales / Depósitos ({depositosCliente.length})</h3>
             <div className="grid grid-cols-2 gap-2 mb-2">
-              <input placeholder="Nombre (ej. Local Centro)" value={depositoTemp.nombre} onChange={e => setDepositoTemp({ ...depositoTemp, nombre: e.target.value })} className="border p-2 rounded text-sm" />
-              <input placeholder="Dirección exacta" value={depositoTemp.direccion} onChange={e => setDepositoTemp({ ...depositoTemp, direccion: e.target.value })} className="border p-2 rounded text-sm" />
-              <input placeholder="Ciudad" value={depositoTemp.ciudad} onChange={e => setDepositoTemp({ ...depositoTemp, ciudad: e.target.value })} className="border p-2 rounded text-sm" />
-              <input placeholder="Barrio" value={depositoTemp.barrio} onChange={e => setDepositoTemp({ ...depositoTemp, barrio: e.target.value })} className="border p-2 rounded text-sm" />
+              <input placeholder="Nombre (ej. Local Centro)" value={depositoTemp.nombre} onChange={e => setDepositoTemp({ ...depositoTemp, nombre: e.target.value })} className="border p-2 rounded text-sm outline-none focus:ring-1 focus:ring-orange-500" />
+              <input placeholder="Dirección exacta" value={depositoTemp.direccion} onChange={e => setDepositoTemp({ ...depositoTemp, direccion: e.target.value })} className="border p-2 rounded text-sm outline-none focus:ring-1 focus:ring-orange-500" />
+              <input placeholder="Ciudad" value={depositoTemp.ciudad} onChange={e => setDepositoTemp({ ...depositoTemp, ciudad: e.target.value })} className="border p-2 rounded text-sm outline-none focus:ring-1 focus:ring-orange-500" />
+              <input placeholder="Barrio" value={depositoTemp.barrio} onChange={e => setDepositoTemp({ ...depositoTemp, barrio: e.target.value })} className="border p-2 rounded text-sm outline-none focus:ring-1 focus:ring-orange-500" />
+            </div>
+
+            {/* MAPA INTERACTIVO ESTILO UBER */}
+            <div className="mb-3">
+              <label className="block text-sm font-bold text-orange-900 mb-1 flex items-center gap-1">
+                <MapPin className="w-4 h-4 text-orange-600" /> Ubicación exacta en el Mapa (Haz Clic)
+              </label>
+              <div className="h-48 rounded overflow-hidden border-2 border-orange-200 z-0 relative shadow-inner cursor-crosshair">
+                <MapContainer center={[-25.2637, -57.5759]} zoom={12} className="w-full h-full z-0">
+                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                  <LocationPicker
+                    position={depositoTemp.coordenadas}
+                    setPosition={(coords) => setDepositoTemp({ ...depositoTemp, coordenadas: coords })}
+                  />
+                </MapContainer>
+              </div>
+              <div className="flex justify-between items-center mt-1">
+                <p className="text-[10px] text-orange-600 italic">
+                  Lat: {depositoTemp.coordenadas.lat.toFixed(5)}, Lng: {depositoTemp.coordenadas.lng.toFixed(5)}
+                </p>
+                <p className="text-[10px] bg-orange-200 text-orange-800 px-2 py-0.5 rounded font-bold uppercase">Pin Actualizado</p>
+              </div>
             </div>
             <button type="button" onClick={agregarDepositoTemp} className="bg-orange-200 text-orange-800 px-3 py-1 text-sm font-bold rounded hover:bg-orange-300 w-full mb-3">
               + Añadir Depósito al Cliente
@@ -486,7 +685,13 @@ export default function App() {
     </div>
   );
 
-
+  const renderRutas = () => {
+    return <Rutas
+      grafo={grafoRutasRef.current}
+      pedidosEnTransito={pedidosEnTransito}
+      rutaSugerida={rutaSugerida}
+    />;
+  };
 
   return (
     <div className="bg-background text-on-background font-body-md min-h-screen flex">
@@ -565,7 +770,7 @@ export default function App() {
         <main className="flex-1 p-xl">
           {currentTab === 'dashboard' && renderDashboard()}
           {currentTab === 'inventario' && renderInventario()}
-          {currentTab === 'rutas' && <Rutas grafo={grafoRutasRef.current} pedidosEnTransito={pedidosEnTransito} />}
+          {currentTab === 'rutas' && renderRutas()}
           {currentTab === 'clientes' && renderClientes()}
         </main>
       </div>

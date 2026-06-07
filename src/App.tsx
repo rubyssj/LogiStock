@@ -146,155 +146,386 @@ export default function App() {
 
 
   const renderDashboard = () => (
-    <div className="max-w-container-max mx-auto">
+    <div className="max-w-container-max mx-auto space-y-6">
+      {/* Cabecera del Dashboard */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-slate-150">
+        <div>
+          <h1 className="text-3xl font-black text-slate-800 tracking-tight">Panel Principal</h1>
+          <p className="text-sm text-slate-500 mt-1 font-medium">Bienvenido de vuelta. Aquí está el resumen de operaciones para hoy.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button className="flex items-center gap-2 bg-white text-slate-700 border border-slate-200 hover:border-slate-300 hover:bg-slate-50 px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-all cursor-pointer">
+            <span className="material-symbols-outlined text-lg">download</span>
+            Exportar Reporte
+          </button>
+          <button className="flex items-center gap-2 bg-primary text-white hover:bg-primary/95 px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-all cursor-pointer">
+            <span className="material-symbols-outlined text-lg">calendar_today</span>
+            Ver Historial
+          </button>
+        </div>
+      </div>
+
       {/* Summary Cards Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-gutter mb-xl">
-        {/* Card 1 */}
-        <div className="bg-surface-container-lowest p-lg rounded-lg border border-outline-variant shadow-[0_2px_4px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_16px_rgba(0,0,0,0.08)] transition-shadow duration-300 flex flex-col justify-between">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <p className="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-wider">Total Productos</p>
-              <h3 className="text-h1 font-h1 text-on-surface mt-1">{colaInventarioRef.current.mapearStockActual().length}</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {/* Card 1: Total Productos */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.05)] transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[160px]">
+          {/* Fila Superior */}
+          <div className="flex justify-between items-center mb-2">
+            <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
+              <span className="material-symbols-outlined text-lg">inventory</span>
             </div>
-            <div className="p-2 bg-primary-container/10 rounded-full text-primary">
-              <span className="material-symbols-outlined">inventory</span>
-            </div>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100">
+              <span className="material-symbols-outlined text-xs">trending_up</span>
+              +12% esta semana
+            </span>
           </div>
-          <div className="flex items-center text-sm text-primary font-medium mt-2">
-            <span className="material-symbols-outlined text-sm mr-1">trending_up</span>
-            <span>+12% esta semana</span>
+          {/* Fila Media e Inferior */}
+          <div className="flex justify-between items-end">
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Productos</p>
+              <h3 className="text-3xl font-black text-slate-800 mt-1">{colaInventarioRef.current.mapearStockActual().length}</h3>
+            </div>
+            {/* Sparkline (Green) */}
+            <div className="w-24 h-10 flex items-end">
+              <svg className="w-full h-full" viewBox="0 0 100 30" preserveAspectRatio="none">
+                <path
+                  d="M 0 25 C 20 10, 40 28, 60 12 C 80 5, 90 22, 100 18"
+                  fill="none"
+                  stroke="#16a34a"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
           </div>
         </div>
-        {/* Card 2 */}
-        <div className="bg-surface-container-lowest p-lg rounded-lg border border-outline-variant shadow-[0_2px_4px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_16px_rgba(0,0,0,0.08)] transition-shadow duration-300 flex flex-col justify-between">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <p className="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-wider">Pedidos Pendientes</p>
-              <h3 className="text-h1 font-h1 text-on-surface mt-1">15</h3>
+
+        {/* Card 2: Pedidos Pendientes */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.05)] transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[160px]">
+          {/* Fila Superior */}
+          <div className="flex justify-between items-center mb-2">
+            <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center">
+              <span className="material-symbols-outlined text-lg">pending_actions</span>
             </div>
-            <div className="p-2 bg-tertiary-container/10 rounded-full text-tertiary">
-              <span className="material-symbols-outlined">pending_actions</span>
-            </div>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full border border-amber-100">
+              <span className="material-symbols-outlined text-xs">schedule</span>
+              Requiere atención
+            </span>
           </div>
-          <div className="flex items-center text-sm text-outline font-medium mt-2">
-            <span className="material-symbols-outlined text-sm mr-1">schedule</span>
-            <span>Requiere atención</span>
+          {/* Fila Media e Inferior */}
+          <div className="flex justify-between items-end">
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Pedidos Pendientes</p>
+              <h3 className="text-3xl font-black text-slate-800 mt-1">15</h3>
+            </div>
+            {/* Sparkline (Orange) */}
+            <div className="w-24 h-10 flex items-end">
+              <svg className="w-full h-full" viewBox="0 0 100 30" preserveAspectRatio="none">
+                <path
+                  d="M 0 15 C 20 28, 40 10, 60 25 C 80 30, 90 15, 100 20"
+                  fill="none"
+                  stroke="#d97706"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
           </div>
         </div>
-        {/* Card 3 */}
-        <div className="bg-surface-container-lowest p-lg rounded-lg border border-outline-variant shadow-[0_2px_4px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_16px_rgba(0,0,0,0.08)] transition-shadow duration-300 flex flex-col justify-between">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <p className="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-wider">Nodos de Ruta</p>
-              <h3 className="text-h1 font-h1 text-on-surface mt-1">{Object.keys((grafoRutasRef.current as any).puntos).length}</h3>
+
+        {/* Card 3: Nodos de Ruta */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.05)] transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[160px]">
+          {/* Fila Superior */}
+          <div className="flex justify-between items-center mb-2">
+            <div className="w-10 h-10 bg-sky-50 text-sky-600 rounded-xl flex items-center justify-center">
+              <span className="material-symbols-outlined text-lg">local_shipping</span>
             </div>
-            <div className="p-2 bg-primary-container/10 rounded-full text-primary">
-              <span className="material-symbols-outlined">local_shipping</span>
-            </div>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 bg-sky-50 text-sky-700 rounded-full border border-sky-100">
+              <span className="material-symbols-outlined text-xs">route</span>
+              Pedidos en ruta
+            </span>
           </div>
-          <div className="flex items-center text-sm text-outline font-medium mt-2">
-            <span className="material-symbols-outlined text-sm mr-1">route</span>
-            <span>Nodos mapeados en el grafo</span>
+          {/* Fila Media e Inferior */}
+          <div className="flex justify-between items-end">
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Nodos de Ruta</p>
+              <h3 className="text-3xl font-black text-slate-800 mt-1">{Object.keys((grafoRutasRef.current as any).puntos).length}</h3>
+            </div>
+            {/* Sparkline (Blue) */}
+            <div className="w-24 h-10 flex items-end">
+              <svg className="w-full h-full" viewBox="0 0 100 30" preserveAspectRatio="none">
+                <path
+                  d="M 0 20 C 25 30, 40 5, 60 15 C 80 25, 90 10, 100 10"
+                  fill="none"
+                  stroke="#0284c7"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
           </div>
         </div>
-        {/* Card 4 */}
-        <div className="bg-surface-container-lowest p-lg rounded-lg border border-outline-variant shadow-[0_2px_4px_rgba(0,0,0,0.05)] hover:shadow-[0_8px_16px_rgba(0,0,0,0.08)] transition-shadow duration-300 flex flex-col justify-between">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <p className="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-wider">Clientes Hash Table</p>
-              <h3 className="text-h1 font-h1 text-on-surface mt-1">{tablaClientesRef.current.obtenerClaves().length}</h3>
+
+        {/* Card 4: Clientes Hash Table */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.05)] transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[160px]">
+          {/* Fila Superior */}
+          <div className="flex justify-between items-center mb-2">
+            <div className="w-10 h-10 bg-fuchsia-50 text-fuchsia-600 rounded-xl flex items-center justify-center">
+              <span className="material-symbols-outlined text-lg">groups</span>
             </div>
-            <div className="p-2 bg-primary-container/10 rounded-full text-primary">
-              <span className="material-symbols-outlined">groups</span>
-            </div>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 bg-fuchsia-50 text-fuchsia-700 rounded-full border border-fuchsia-100">
+              <span className="material-symbols-outlined text-xs">trending_up</span>
+              +3 este mes
+            </span>
           </div>
-          <div className="flex items-center text-sm text-primary font-medium mt-2">
-            <span className="material-symbols-outlined text-sm mr-1">trending_up</span>
-            <span>+3 este mes</span>
+          {/* Fila Media e Inferior */}
+          <div className="flex justify-between items-end">
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Clientes Hash Table</p>
+              <h3 className="text-3xl font-black text-slate-800 mt-1">{tablaClientesRef.current.obtenerClaves().length}</h3>
+            </div>
+            {/* Sparkline (Purple/Pink) */}
+            <div className="w-24 h-10 flex items-end">
+              <svg className="w-full h-full" viewBox="0 0 100 30" preserveAspectRatio="none">
+                <path
+                  d="M 0 22 C 20 12, 40 28, 60 10 C 80 5, 90 25, 100 15"
+                  fill="none"
+                  stroke="#d01c8b"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Main Content Split */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-gutter">
-        {/* Actividad Reciente (Bento Grid Style) */}
-        <div className="lg:col-span-2 bg-surface-container-lowest rounded-xl border border-outline-variant p-lg shadow-[0_2px_4px_rgba(0,0,0,0.05)]">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-h3 font-h3 text-on-surface">Actividad Reciente</h3>
-            <button className="text-sm font-medium text-primary hover:text-primary transition-colors">Ver todo</button>
+      {/* Central Section - Two Columns */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Column 1: Capacidad del Depósito */}
+        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800">Capacidad del Depósito</h3>
+            <p className="text-xs text-slate-400 mt-1">Uso de espacio físico total</p>
           </div>
-          <div className="space-y-4">
-            {/* Log Entry 1 */}
-            <div className="flex items-start gap-4 p-4 rounded-lg hover:bg-surface-container-low transition-colors duration-200 border border-transparent hover:border-surface-variant">
-              <div className="w-10 h-10 rounded-full bg-primary-container/10 flex items-center justify-center text-primary flex-shrink-0">
-                <span className="material-symbols-outlined text-md">add_box</span>
-              </div>
-              <div className="flex-1">
-                <h4 className="text-body-lg font-body-lg text-on-surface font-medium">Entrada de Mercadería - Código #A102</h4>
-                <p className="text-body-md font-body-md text-on-surface-variant mt-1">Se recibieron 50 unidades de Yerba Mate 'El Campesino'.</p>
-              </div>
-              <div className="text-label-sm font-label-sm text-outline text-right">
-                <span>Hace 2h</span>
-              </div>
+          
+          {/* Donut Chart */}
+          <div className="flex justify-center items-center my-6 relative w-44 h-44 mx-auto">
+            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 180 180">
+              {/* Background circle */}
+              <circle
+                cx="90"
+                cy="90"
+                r="74"
+                stroke="#f1f5f9"
+                strokeWidth="16"
+                fill="transparent"
+              />
+              {/* Foreground circle */}
+              <circle
+                cx="90"
+                cy="90"
+                r="74"
+                stroke="#16a34a"
+                strokeWidth="16"
+                fill="transparent"
+                strokeDasharray={2 * Math.PI * 74}
+                strokeDashoffset={2 * Math.PI * 74 * (1 - 0.78)}
+                strokeLinecap="round"
+              />
+            </svg>
+            {/* Center label */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-3xl font-black text-slate-800 leading-none">78%</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Ocupado</span>
             </div>
-            {/* Log Entry 2 */}
-            <div className="flex items-start gap-4 p-4 rounded-lg hover:bg-surface-container-low transition-colors duration-200 border border-transparent hover:border-surface-variant">
-              <div className="w-10 h-10 rounded-full bg-primary-container/10 flex items-center justify-center text-primary flex-shrink-0">
-                <span className="material-symbols-outlined text-md">route</span>
-              </div>
-              <div className="flex-1">
-                <h4 className="text-body-lg font-body-lg text-on-surface font-medium">Ruta a Asunción Iniciada</h4>
-                <p className="text-body-md font-body-md text-on-surface-variant mt-1">Vehículo PY-104 en camino con 12 pedidos.</p>
-              </div>
-              <div className="text-label-sm font-label-sm text-outline text-right">
-                <span>Hace 4h</span>
-              </div>
+          </div>
+
+          {/* Available / Total Labels */}
+          <div className="grid grid-cols-2 gap-4 border-t border-slate-50 pt-4 text-center">
+            <div>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Disponible</p>
+              <p className="text-base font-black text-slate-700 mt-1">1.100 m²</p>
             </div>
-            {/* Log Entry 3 */}
-            <div className="flex items-start gap-4 p-4 rounded-lg hover:bg-surface-container-low transition-colors duration-200 border border-transparent hover:border-surface-variant">
-              <div className="w-10 h-10 rounded-full bg-tertiary-container/10 flex items-center justify-center text-tertiary flex-shrink-0">
-                <span className="material-symbols-outlined text-md">warning</span>
-              </div>
-              <div className="flex-1">
-                <h4 className="text-body-lg font-body-lg text-on-surface font-medium">Stock Bajo Detectado</h4>
-                <p className="text-body-md font-body-md text-on-surface-variant mt-1">Aceite de Soja 'Soja Linda' por debajo del mínimo (5 unidades).</p>
-              </div>
-              <div className="text-label-sm font-label-sm text-outline text-right">
-                <span>Ayer</span>
-              </div>
+            <div className="border-l border-slate-100">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total</p>
+              <p className="text-base font-black text-slate-700 mt-1">5.000 m²</p>
             </div>
           </div>
         </div>
 
-        {/* Quick Actions / Status */}
-        <div className="bg-surface-container-lowest rounded-xl border border-outline-variant p-lg shadow-[0_2px_4px_rgba(0,0,0,0.05)]">
-          <h3 className="text-h3 font-h3 text-on-surface mb-6">Estado del Sistema</h3>
-          <div className="mb-8">
-            <div className="flex justify-between mb-2">
-              <span className="text-body-md font-body-md text-on-surface">Capacidad del Depósito</span>
-              <span className="text-body-md font-body-md text-on-surface font-medium">78%</span>
+        {/* Column 2: Rutas Críticas en Progreso */}
+        <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)] flex flex-col justify-between">
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h3 className="text-lg font-bold text-slate-800">Rutas Críticas en Progreso</h3>
+              <p className="text-xs text-slate-400 mt-1">Seguimiento de flota en tiempo real</p>
             </div>
-            <div className="w-full bg-surface-variant rounded-full h-2.5">
-              <div className="bg-primary h-2.5 rounded-full" style={{ width: '78%' }}></div>
-            </div>
-          </div>
-          <div className="space-y-3">
-            <h4 className="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-wider mb-2">Acciones Rápidas</h4>
-            <button className="w-full flex items-center justify-between p-3 border border-outline-variant rounded-lg hover:border-primary-container hover:bg-surface-container-low transition-colors text-left group">
-              <div className="flex items-center gap-3">
-                <span className="material-symbols-outlined text-outline group-hover:text-primary transition-colors">qr_code_scanner</span>
-                <span className="text-body-md font-body-md text-on-surface font-medium">Escanear Código</span>
-              </div>
-              <span className="material-symbols-outlined text-outline group-hover:text-primary transition-colors text-sm">chevron_right</span>
-            </button>
-            <button className="w-full flex items-center justify-between p-3 border border-outline-variant rounded-lg hover:border-primary-container hover:bg-surface-container-low transition-colors text-left group">
-              <div className="flex items-center gap-3">
-                <span className="material-symbols-outlined text-outline group-hover:text-primary transition-colors">description</span>
-                <span className="text-body-md font-body-md text-on-surface font-medium">Generar Reporte</span>
-              </div>
-              <span className="material-symbols-outlined text-outline group-hover:text-primary transition-colors text-sm">chevron_right</span>
+            <button 
+              onClick={() => setCurrentTab('rutas')} 
+              className="text-xs font-bold text-primary hover:text-emerald-700 transition-colors flex items-center gap-1 cursor-pointer"
+            >
+              Ver mapa de flota
+              <span className="material-symbols-outlined text-xs">arrow_forward</span>
             </button>
           </div>
+
+          {/* Route Cards */}
+          <div className="space-y-4">
+            {/* Route Card 1 */}
+            <div className="border border-slate-100 rounded-xl p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors duration-200">
+              <div className="flex justify-between items-start mb-3">
+                <div className="flex gap-3 items-center">
+                  <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
+                    <span className="material-symbols-outlined text-lg">local_shipping</span>
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-800">Camión #402 - Ruta Asunción/CDE</h4>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">Conductor: Carlos Martínez</p>
+                  </div>
+                </div>
+                <span className="inline-flex items-center text-[10px] font-bold px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100">
+                  En Tiempo
+                </span>
+              </div>
+              {/* Progress Line */}
+              <div className="w-full bg-slate-100 rounded-full h-1.5 mb-3">
+                <div className="bg-emerald-500 h-1.5 rounded-full" style={{ width: '70%' }}></div>
+              </div>
+              <div className="flex justify-between text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                <span>Partida: 06:00 AM</span>
+                <span>Llegada Est.: 02:30 PM</span>
+              </div>
+            </div>
+
+            {/* Route Card 2 */}
+            <div className="border border-slate-100 rounded-xl p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors duration-200">
+              <div className="flex justify-between items-start mb-3">
+                <div className="flex gap-3 items-center">
+                  <div className="p-2 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center">
+                    <span className="material-symbols-outlined text-lg">local_shipping</span>
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-800">Camión #115 - Distribución Urbana</h4>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">Conductor: Luis Ferreira</p>
+                  </div>
+                </div>
+                <span className="inline-flex items-center text-[10px] font-bold px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full border border-amber-100">
+                  Demorado (15m)
+                </span>
+              </div>
+              {/* Progress Line */}
+              <div className="w-full bg-slate-100 rounded-full h-1.5 mb-3">
+                <div className="bg-amber-500 h-1.5 rounded-full" style={{ width: '85%' }}></div>
+              </div>
+              <div className="flex justify-between text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                <span>Partida: 08:00 AM</span>
+                <span>Llegada Est.: 11:45 AM</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom Section - Activity Table */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800">Actividad Reciente del Almacén</h3>
+            <p className="text-xs text-slate-400 mt-1">Registro detallado de las últimas operaciones físicas</p>
+          </div>
+          {/* Dropdown Selector */}
+          <div className="relative">
+            <select className="appearance-none bg-slate-50 border border-slate-200 text-xs font-bold text-slate-600 rounded-xl px-4 py-2 pr-8 focus:outline-none hover:bg-slate-100 transition-colors cursor-pointer">
+              <option>Todos los eventos</option>
+              <option>Entradas</option>
+              <option>Salidas</option>
+              <option>Alertas</option>
+            </select>
+            <span className="material-symbols-outlined text-slate-400 text-sm absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+              keyboard_arrow_down
+            </span>
+          </div>
+        </div>
+
+        {/* Structured Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                <th className="pb-3 pl-4">Operación</th>
+                <th className="pb-3">Producto</th>
+                <th className="pb-3">Cantidad</th>
+                <th className="pb-3">Costo / Valor</th>
+                <th className="pb-3">Estado</th>
+                <th className="pb-3 pr-4 text-right">Hora</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50 text-sm">
+              {/* Row 1 */}
+              <tr className="hover:bg-slate-50/50 transition-colors">
+                <td className="py-4 pl-4 font-bold text-slate-700">
+                  <span className="inline-flex items-center gap-2">
+                    <span className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                      <span className="material-symbols-outlined text-base">login</span>
+                    </span>
+                    Entrada Stock
+                  </span>
+                </td>
+                <td className="py-4 text-slate-600 font-medium">Yerba Mate 'El Campesino' (Código #A102)</td>
+                <td className="py-4 text-slate-500 font-semibold">50 unidades</td>
+                <td className="py-4 text-emerald-700 font-black">₲ 1.250.000</td>
+                <td className="py-4">
+                  <span className="inline-flex items-center text-[11px] font-bold px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100">
+                    COMPLETADO
+                  </span>
+                </td>
+                <td className="py-4 pr-4 text-right text-xs text-slate-400 font-bold">Hace 2h</td>
+              </tr>
+
+              {/* Row 2 */}
+              <tr className="hover:bg-slate-50/50 transition-colors">
+                <td className="py-4 pl-4 font-bold text-slate-700">
+                  <span className="inline-flex items-center gap-2">
+                    <span className="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
+                      <span className="material-symbols-outlined text-base">logout</span>
+                    </span>
+                    Salida Stock
+                  </span>
+                </td>
+                <td className="py-4 text-slate-600 font-medium">Yerba Mate 'El Campesino' (Código #A102)</td>
+                <td className="py-4 text-slate-500 font-semibold">12 unidades</td>
+                <td className="py-4 text-rose-700 font-black">₲ 300.000</td>
+                <td className="py-4">
+                  <span className="inline-flex items-center text-[11px] font-bold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full border border-amber-100">
+                    EN PROCESO
+                  </span>
+                </td>
+                <td className="py-4 pr-4 text-right text-xs text-slate-400 font-bold">Hace 4h</td>
+              </tr>
+
+              {/* Row 3 */}
+              <tr className="hover:bg-slate-50/50 transition-colors">
+                <td className="py-4 pl-4 font-bold text-slate-700">
+                  <span className="inline-flex items-center gap-2">
+                    <span className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+                      <span className="material-symbols-outlined text-base">warning</span>
+                    </span>
+                    Alerta Stock
+                  </span>
+                </td>
+                <td className="py-4 text-slate-600 font-medium">Aceite de Soja 'Soja Linda' (Código #S302)</td>
+                <td className="py-4 text-slate-500 font-semibold">5 unidades</td>
+                <td className="py-4 text-slate-500 font-black">₲ 75.000</td>
+                <td className="py-4">
+                  <span className="inline-flex items-center text-[11px] font-bold px-2.5 py-1 bg-rose-50 text-rose-700 rounded-full border border-rose-100">
+                    ALERTA
+                  </span>
+                </td>
+                <td className="py-4 pr-4 text-right text-xs text-slate-400 font-bold">Ayer</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
